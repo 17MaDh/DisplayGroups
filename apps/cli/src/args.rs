@@ -54,6 +54,12 @@ pub enum Command {
     List,
     /// Show what is on screen now.
     Status,
+    /// Show each display's number and name on that display for a few seconds.
+    Identify {
+        /// How long to show them, in seconds (1–30).
+        #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..=30))]
+        seconds: u32,
+    },
     /// Copy a group under a new name.
     Duplicate { group: String },
     /// Restore the last layout that worked (or extend all displays with --extend).

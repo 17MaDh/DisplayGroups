@@ -175,6 +175,8 @@ pub const MF_POPUP: u32 = 0x0010;
 pub const TPM_RIGHTBUTTON: u32 = 0x0002;
 pub const TPM_RETURNCMD: u32 = 0x0100;
 pub const TPM_NONOTIFY: u32 = 0x0080;
+/// Right-to-left menu (Arabic, Hebrew).
+pub const TPM_LAYOUTRTL: u32 = 0x8000;
 
 // Window styles
 pub const WS_POPUP: u32 = 0x8000_0000;
@@ -183,12 +185,15 @@ pub const WS_EX_TRANSPARENT: u32 = 0x0000_0020;
 pub const WS_EX_TOOLWINDOW: u32 = 0x0000_0080;
 pub const WS_EX_LAYERED: u32 = 0x0008_0000;
 pub const WS_EX_NOACTIVATE: u32 = 0x0800_0000;
+/// Mirrors the window's coordinates and drawing for right-to-left languages.
+pub const WS_EX_LAYOUTRTL: u32 = 0x0040_0000;
 pub const SW_HIDE: i32 = 0;
 pub const HWND_TOPMOST: HWND = -1isize as HWND;
 pub const SWP_NOACTIVATE: u32 = 0x0010;
 pub const SWP_SHOWWINDOW: u32 = 0x0040;
 pub const LWA_ALPHA: u32 = 0x2;
 pub const MONITOR_DEFAULTTOPRIMARY: u32 = 0x1;
+pub const MONITOR_DEFAULTTONEAREST: u32 = 0x2;
 pub const MDT_EFFECTIVE_DPI: i32 = 0;
 pub const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
 pub const DWMWCP_ROUND: u32 = 2;
@@ -199,7 +204,10 @@ pub const TRANSPARENT: i32 = 1;
 pub const DEFAULT_CHARSET: u32 = 1;
 pub const CLEARTYPE_QUALITY: u32 = 5;
 pub const DT_CENTER: u32 = 0x0001;
+pub const DT_RIGHT: u32 = 0x0002;
 pub const DT_VCENTER: u32 = 0x0004;
+/// Right-to-left reading order for bidirectional text.
+pub const DT_RTLREADING: u32 = 0x0002_0000;
 pub const DT_SINGLELINE: u32 = 0x0020;
 pub const DT_NOPREFIX: u32 = 0x0800;
 pub const DT_END_ELLIPSIS: u32 = 0x8000;
@@ -331,6 +339,8 @@ extern "system" {
         cb: u32,
     ) -> i32;
     pub fn K32EmptyWorkingSet(process: HANDLE) -> i32;
+    pub fn GetUserDefaultUILanguage() -> u16;
+    pub fn LCIDToLocaleName(lcid: u32, name: *mut u16, len: i32, flags: u32) -> i32;
 }
 
 #[link(name = "shcore")]

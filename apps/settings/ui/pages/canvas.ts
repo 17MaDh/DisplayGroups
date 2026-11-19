@@ -1,8 +1,8 @@
 // The 2D layout canvas: drag displays, snap to edges, keep the primary at (0,0).
 
 import type { DisplaySetting, Group } from "../api";
-import { s } from "../dom";
-import { monitorName } from "../state";
+import { ltr, s } from "../dom";
+import { monitorName, monitorNumber } from "../state";
 
 const SNAP_PX = 8;
 
@@ -101,7 +101,8 @@ export function layoutCanvas(
         "aria-label": monitorName(d.monitor),
       },
       s("rect", { width: b.w, height: b.h, rx: 24 * fontScale, ry: 24 * fontScale, "vector-effect": "non-scaling-stroke" }),
-      s("text", { class: "num", x: 28 * fontScale, y: 52 * fontScale, style: `font-size:${32 * fontScale}px` }, String(i + 1)),
+      // The same number "Identify" shows on the real screen.
+      s("text", { class: "num", x: 28 * fontScale, y: 52 * fontScale, style: `font-size:${32 * fontScale}px` }, String(monitorNumber(d.monitor))),
       s(
         "text",
         { x: b.w / 2, y: b.h / 2 - 6 * fontScale, "text-anchor": "middle", style: `font-size:${18 * fontScale}px` },
@@ -110,7 +111,7 @@ export function layoutCanvas(
       s(
         "text",
         { class: "sub", x: b.w / 2, y: b.h / 2 + 20 * fontScale, "text-anchor": "middle", style: `font-size:${15 * fontScale}px` },
-        `${d.mode.width}×${d.mode.height} · ${rate} Hz`,
+        ltr(`${d.mode.width}×${d.mode.height} · ${rate} Hz`),
       ),
     );
     g.addEventListener("pointerdown", (e) => startDrag(e, i, g));

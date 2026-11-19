@@ -70,10 +70,28 @@
 >   - Closing the window ends the process and all its WebView2 processes.
 > - **Design change:** the UI uses hand-written Fluent-style CSS instead of Fluent UI Web
 >   Components. It is lighter, has no runtime UI dependency, and gives full control over RTL.
-> - **Not done yet:**
->   - "Identify" (numbers on each screen).
->   - Picking a custom icon file from the UI (the CLI's `shortcut --icon` supports it).
->   - Translations beyond English.
+> - **Left for Phase 6, now done:** "Identify", picking a custom icon file in the UI, and a
+>   second language (Arabic).
+>
+> **Phase 6 (completing v1.0) done:**
+> - **Identify:**
+>   - `displaygroups identify` and a button in the editor.
+>   - The number on each screen matches the editor canvas (§9).
+> - **Custom group icons:** chosen from the UI with the native Open dialog, imported as `.ico`.
+> - **Languages:**
+>   - Arabic translation.
+>   - `"system"` language, the new default, which follows the Windows display language.
+>   - Right-to-left layout in the native parts: a mirrored countdown dialog, an RTL tray menu
+>     (`TPM_LAYOUTRTL`), and the OSD and Identify with RTL reading order. Technical values
+>     ("3840 × 2160 · 120 Hz") stay left to right.
+>   - The agent reloads strings when the language setting changes.
+> - **Checks:** 105 automated tests, including translation checks.
+> - **Seen on the test machine, displays unchanged:**
+>   - Identify panels on both screens at 100% and 150%.
+>   - The Arabic OSD and dialog in dark and light.
+>   - Every settings page in Arabic.
+>   - The custom-icon dialog, opened and cancelled.
+> - **Not seen yet:** the RTL tray menu, which needs a real click.
 >
 > **Phase 5 (packaging and release) done.** §13 has the details.
 > - **Installer:** Tauri's NSIS bundler, per-machine, with DisplayGroups hooks.
@@ -508,7 +526,12 @@ Tool: `tools/lockscreen-spike`; steps in `docs/lockscreen-spike.md`. The broker 
 - **Layout canvas:**
   - Monitors are scaled rectangles, sized after rotation.
   - Drag with 8 px edge snapping and no overlaps; exact X/Y fields underneath.
-  - "Identify" flashes numbers on each screen.
+  - "Identify" (`displaygroups identify`) shows a large number, the name and the mode in the middle
+    of each active display for 3 s. It uses OSD-style windows: layered, click-through, never
+    focused.
+  - A monitor's number is its position among `config.monitors` ordered by key
+    (`Config::monitor_number`), so it is the same in every group and in the canvas. Displays not
+    in the config are numbered after them.
   - "Capture current setup" saves the current layout and the timings that strategy S1 uses.
   - "Test" applies the group with the countdown.
 - **Shortcut generator:**

@@ -56,6 +56,14 @@ function append(el: Element, children: Child[]): void {
   }
 }
 
+/**
+ * Keeps technical text ("3840×2160 · 120 Hz", coordinates) in left-to-right order on
+ * right-to-left pages, using Unicode isolates (works in <option> and SVG text too).
+ */
+export function ltr(text: string): string {
+  return `⁦${text}⁩`;
+}
+
 /** A Segoe Fluent Icons glyph. */
 export function icon(codepoint: string, label?: string): HTMLSpanElement {
   return h("span", { class: "glyph", "aria-hidden": label ? undefined : "true", "aria-label": label }, codepoint);

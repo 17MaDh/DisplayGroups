@@ -62,26 +62,7 @@ fn import_icon(ctx: &Ctx, value: &str) -> Result<String, CliError> {
         }
         return Ok(value.to_string());
     }
-    let source = Path::new(value);
-    let bytes = std::fs::read(source).map_err(|e| CliError::Usage(format!("{value}: {e}")))?;
-    let ext = source
-        .extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-    let ico = match ext.as_str() {
-        "ico" => bytes,
-        "png" => icons::png_to_ico(&bytes).map_err(CliError::Usage)?,
-        _ => {
-            return Err(CliError::Usage(
-                "the icon must be a .ico or .png file".into(),
-            ))
-        }
-    };
-    let stem = source
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let file = format!("custom-{}.ico", integration::safe_file_name(&stem));
+    let (file, ico) = icons::import_file(Path::new(value)).map_err(CliError::Usage)?;
     store::write_atomic(&ctx.paths.icons_dir.join(&file), &ico)?;
     Ok(format!("file:{file}"))
 }

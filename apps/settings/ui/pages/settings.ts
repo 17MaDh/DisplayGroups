@@ -20,7 +20,12 @@ async function integrationToggle(kind: "startup" | "protocol", on: boolean): Pro
 export function renderSettings(): HTMLElement {
   const s = state.config.settings;
   const fb = s.disconnectFallback;
-  const languages = state.platform.languages.map((l) => [l, l === "en" ? "English" : l] as [string, string]);
+  const { languages: available, systemLanguage } = state.platform;
+  const systemName = available.find((l) => l.code === systemLanguage)?.name ?? "English";
+  const languages: [string, string][] = [
+    ["system", t("settings.languageSystem", { language: systemName })],
+    ...available.map((l) => [l.code, l.name] as [string, string]),
+  ];
   return h(
     "div",
     { class: "page" },
@@ -32,7 +37,7 @@ export function renderSettings(): HTMLElement {
       t("settings.languageHint"),
       select(languages, s.language, async (v) => {
         s.language = v;
-        await setLanguage(v);
+        await setLanguage(v, systemLanguage);
         changed();
       }),
     ),
@@ -56,7 +61,7 @@ export function renderSettings(): HTMLElement {
           disabled: !s.osd.enabled,
           onchange: (e: Event) => ((s.osd.durationMs = Number((e.target as HTMLInputElement).value)), changed()),
         }),
-        `${(s.osd.durationMs / 1000).toFixed(1)} s`,
+        t("common.seconds", { n: (s.osd.durationMs / 1000).toFixed(1) }),
       ),
     ),
     row(t("settings.protocol"), t("settings.protocolHint"), toggle(state.integration.protocol, (v) => void integrationToggle("protocol", v))),

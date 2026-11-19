@@ -47,6 +47,7 @@ pub(crate) fn dispatch(
         Command::Validate { group } => validate_group(&cfg, &group, out),
         Command::List => list(&cfg, out),
         Command::Status => status(&cfg, out),
+        Command::Identify { seconds } => identify(&cfg, seconds, out),
         Command::Duplicate { group } => duplicate(ctx, &mut cfg, &group, out),
         Command::Recover { extend } => recover(ctx, extend, out),
         Command::Uri { url } => handle_uri(ctx, &cfg, &url, out),
@@ -381,6 +382,68 @@ fn status(cfg: &Config, out: Output) -> Result<i32, CliError> {
         out.line(format!("  {}: connected, off", c.name));
     }
     out.json(&status);
+    Ok(EXIT_OK)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdentifiedDisplay<'a> {
+    number: u32,
+    name: &'a str,
+    monitor_key: Option<&'a str>,
+    detail: &'a str,
+}
+
+/// Shows each active display's number and name on it. Monitors in the config keep
+/// their number from [`Config::monitor_number`], as in the settings app; displays not
+/// in the config are numbered after them. Nothing is changed.
+fn identify(cfg: &Config, seconds: u32, out: Output) -> Result<i32, CliError> {
+    let display = WinBackend::new();
+    let engine = Engine::new(&display);
+    let status = engine.status(cfg)?;
+    let mut next_unknown = u32::try_from(cfg.monitors.len()).unwrap_or(u32::MAX);
+    let labels: Vec<dg_win::identify::IdentifyLabel> = status
+        .displays
+        .iter()
+        .map(|d| {
+            let key = d.monitor_key.as_deref();
+            let number = key.and_then(|k| cfg.monitor_number(k)).unwrap_or_else(|| {
+                next_unknown += 1;
+                next_unknown
+            });
+            let title = key
+                .and_then(|k| cfg.monitors.get(k))
+                .map_or_else(|| d.name.clone(), |m| m.display_name.clone());
+            let rate = d
+                .refresh_milli_hz
+                .map(|m| format!(" · {} Hz", hz(m)))
+                .unwrap_or_default();
+            dg_win::identify::IdentifyLabel {
+                number,
+                title,
+                detail: format!("{} × {}{rate}", d.width, d.height),
+                x: d.x,
+                y: d.y,
+                width: d.width,
+                height: d.height,
+            }
+        })
+        .collect();
+    for l in &labels {
+        out.line(format!("{}  {} ({})", l.number, l.title, l.detail));
+    }
+    let listed: Vec<IdentifiedDisplay> = labels
+        .iter()
+        .zip(&status.displays)
+        .map(|(l, d)| IdentifiedDisplay {
+            number: l.number,
+            name: &l.title,
+            monitor_key: d.monitor_key.as_deref(),
+            detail: &l.detail,
+        })
+        .collect();
+    out.json(&listed);
+    dg_win::identify::show(&labels, seconds * 1000, out.dark, out.rtl).map_err(CliError::Config)?;
     Ok(EXIT_OK)
 }
 

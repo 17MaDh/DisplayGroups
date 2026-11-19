@@ -1,7 +1,7 @@
 // Diagnostics: versions, paths, logs, import/export, what Windows sees, config problems.
 
 import { api } from "../api";
-import { h, icon } from "../dom";
+import { h, icon, ltr } from "../dom";
 import { t } from "../i18n";
 import { toast } from "../main";
 import { changed, dirty, refreshStatus, reload, state } from "../state";
@@ -40,7 +40,12 @@ export function renderDiagnostics(): HTMLElement {
     h(
       "div",
       { class: "card" },
-      h("div", {}, `DisplayGroups ${state.platform.version} · Windows build ${state.platform.build}${state.portable ? " · portable" : ""}`),
+      h(
+        "div",
+        {},
+        t("diagnostics.version", { version: state.platform.version, build: state.platform.build }) +
+          (state.portable ? ` · ${t("diagnostics.portable")}` : ""),
+      ),
       h("div", { class: "muted", style: "user-select:text" }, state.configPath),
       h("div", { class: "muted", style: "user-select:text" }, state.logsDir),
       h(
@@ -100,7 +105,7 @@ export function renderDiagnostics(): HTMLElement {
                   "td",
                   {},
                   c.active && active
-                    ? `${active.width}×${active.height}${active.refreshMilliHz ? ` · ${Math.round(active.refreshMilliHz / 1000)} Hz` : ""} · (${active.x}, ${active.y})`
+                    ? ltr(`${active.width}×${active.height}${active.refreshMilliHz ? ` · ${Math.round(active.refreshMilliHz / 1000)} Hz` : ""} · (${active.x}, ${active.y})`)
                     : "—",
                 ),
                 h("td", { class: "muted", style: "user-select:text" }, c.monitorKey ?? t("diagnostics.notInConfig")),

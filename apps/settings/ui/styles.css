@@ -460,7 +460,7 @@ input[type="range"] {
   opacity: 0.5;
 }
 
-.group-item .tile {
+.tile {
   display: grid;
   place-items: center;
   inline-size: 32px;
@@ -470,8 +470,28 @@ input[type="range"] {
   flex: none;
 }
 
-.group-item .tile .glyph {
+.tile .glyph {
   font-size: 16px;
+}
+
+img.tile {
+  object-fit: contain;
+  border-radius: 0;
+}
+
+.icon-only .tile {
+  inline-size: 24px;
+  block-size: 24px;
+  border-radius: 5px;
+}
+
+.icon-only .tile .glyph {
+  font-size: 13px;
+}
+
+button.btn.icon-only[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .group-item .meta {
@@ -586,6 +606,10 @@ input[type="range"] {
 
 .display-tabs button {
   border-radius: 14px;
+}
+
+.display-tabs button .num {
+  margin-inline-end: 6px;
 }
 
 .display-tabs button[aria-pressed="true"] {

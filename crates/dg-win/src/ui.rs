@@ -1,6 +1,6 @@
-//! Minimal native UI for the console-less binary: message boxes and the
-//! "Keep these display settings?" countdown. The polished dialog arrives with the
-//! agent (Phase 3/4); this one uses only `MessageBoxW`.
+//! Small native UI pieces: DPI awareness, message boxes, the standard Open dialog
+//! (custom group icons), and a `MessageBoxW` fallback confirmer. The polished
+//! countdown dialog is in [`crate::confirm`].
 
 use std::ffi::c_void;
 use std::sync::mpsc;
@@ -23,6 +23,64 @@ pub fn show_error(title: &str, text: &str) {
 
 pub fn show_info(title: &str, text: &str) {
     message_box(title, text, MB_OK | MB_ICONINFORMATION);
+}
+
+/// The standard Windows "Open" dialog for one kind of file, e.g. `("Icons", "*.ico;*.png")`.
+/// `owner` is the parent window handle (0 for none). `Ok(None)` when cancelled.
+pub fn pick_file(
+    owner: isize,
+    title: &str,
+    filter_name: &str,
+    patterns: &str,
+) -> Result<Option<std::path::PathBuf>, String> {
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
+    use windows::Win32::UI::Shell::{
+        FileOpenDialog, IFileOpenDialog, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH,
+    };
+    /// `HRESULT_FROM_WIN32(ERROR_CANCELLED)`
+    const CANCELLED: i32 = 0x8007_04C7_u32 as i32;
+    let e = |op: &'static str| move |e: windows::core::Error| format!("{op}: {e}");
+    let (name, spec, title) = (
+        HSTRING::from(filter_name),
+        HSTRING::from(patterns),
+        HSTRING::from(title),
+    );
+    // SAFETY: COM calls on a freshly created dialog; the filter strings outlive the
+    // call that reads them, and the returned path is freed with CoTaskMemFree.
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)
+            .map_err(e("FileOpenDialog"))?;
+        let filters = [COMDLG_FILTERSPEC {
+            pszName: PCWSTR(name.as_ptr()),
+            pszSpec: PCWSTR(spec.as_ptr()),
+        }];
+        dialog.SetFileTypes(&filters).map_err(e("SetFileTypes"))?;
+        dialog.SetTitle(&title).map_err(e("SetTitle"))?;
+        let options = dialog.GetOptions().map_err(e("GetOptions"))?;
+        dialog
+            .SetOptions(options | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM)
+            .map_err(e("SetOptions"))?;
+        let parent = (owner != 0).then_some(HWND(owner as *mut c_void));
+        match dialog.Show(parent) {
+            Ok(()) => {}
+            Err(err) if err.code().0 == CANCELLED => return Ok(None),
+            Err(err) => return Err(format!("Show: {err}")),
+        }
+        let item = dialog.GetResult().map_err(e("GetResult"))?;
+        let path = item
+            .GetDisplayName(SIGDN_FILESYSPATH)
+            .map_err(e("GetDisplayName"))?;
+        let text = path.to_string().map_err(|err| err.to_string());
+        CoTaskMemFree(Some(path.0 as *const c_void));
+        Ok(Some(std::path::PathBuf::from(text?)))
+    }
 }
 
 fn message_box(title: &str, text: &str, kind: u32) -> i32 {

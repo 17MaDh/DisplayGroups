@@ -14,6 +14,8 @@ pub struct Output {
     pub json: bool,
     /// Dark theme for native dialogs (resolved from the config's theme setting).
     pub dark: bool,
+    /// Right-to-left layout for native dialogs (from the loaded language).
+    pub rtl: bool,
 }
 
 impl Output {
@@ -61,6 +63,7 @@ impl Output {
                 keep: t("confirm.keep"),
                 revert: t("confirm.revert"),
                 dark: self.dark,
+                rtl: self.rtl,
             })
         }
     }

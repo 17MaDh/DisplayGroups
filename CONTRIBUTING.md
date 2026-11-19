@@ -80,11 +80,28 @@ Switching displays can leave a screen black until the revert timer runs out.
 
 ## Translations
 
-1. Copy `locales/en.json` to `locales/<language>.json`, for example `ar.json`, and translate the
-   values. Keep the keys and the `{placeholders}`.
-2. Missing keys fall back to English one by one, so a partial translation still works.
-3. The installer and the portable ZIP ship every `locales/*.json` file. The language is chosen in
-   Settings.
+English (`en.json`) and Arabic (`ar.json`) ship today. To add a language:
+
+1. Copy `locales/en.json` to `locales/<code>.json`, using the Windows language code without the
+   region (`fr`, not `fr-FR`). Translate the values, and keep the keys and the `{placeholders}`.
+2. Set `language.name` to the language's own name, for example `Français`. Settings lists it by
+   that name.
+3. Missing keys fall back to English one by one, so a partial translation still works.
+   `cargo test` checks that every file:
+   - is valid JSON;
+   - uses only known keys;
+   - keeps each placeholder.
+   `ar.json` must also be complete.
+4. **Right-to-left languages** (`ar`, `he`, `fa`, `ur`) switch the settings app, the tray menu,
+   the on-screen display and the confirmation dialog to a right-to-left layout.
+   - Wrap Latin technical terms that end in punctuation (such as `displaygroups://`) in U+2066…U+2069
+     isolates, as `ar.json` does, so they are not reordered.
+   - In UI code, pass resolutions, refresh rates and coordinates through `ltr()` (`ui/dom.ts`).
+5. The installer and the portable ZIP ship every `locales/*.json` file. The default setting,
+   "Windows language", picks the file that matches the Windows display language.
+
+Debug builds read `locales/` from the repository, so a translation can be tried without copying
+files: change the language in Settings, or set `"language": "<code>"` in the config.
 
 ## Releases and security
 

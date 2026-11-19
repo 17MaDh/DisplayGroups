@@ -102,7 +102,10 @@ export interface Platform {
   mica: boolean;
   build: number;
   version: string;
-  languages: string[];
+  /** English first, then each `locales\<code>.json`, named in its own language. */
+  languages: { code: string; name: string }[];
+  /** What the "system" language setting resolves to. */
+  systemLanguage: string;
 }
 
 export interface ActiveDisplay {
@@ -148,7 +151,8 @@ export type CliCommand =
   | { kind: "validate"; id: string }
   | { kind: "shortcut"; id: string; desktop: boolean; startMenu: boolean }
   | { kind: "startup"; on: boolean }
-  | { kind: "protocol"; on: boolean };
+  | { kind: "protocol"; on: boolean }
+  | { kind: "identify" };
 
 export const api = {
   platform: () => invoke<Platform>("platform"),
@@ -165,6 +169,10 @@ export const api = {
   cli: (command: CliCommand) => invoke<CliResult>("run_cli", { command }),
   applyGroup: (id: string) => invoke<void>("apply_group", { id }),
   builtinIcons: () => invoke<Record<string, string>>("builtin_icons"),
+  /** Windows "Open" dialog for a .ico/.png; returns the value for `group.icon`, or null. */
+  pickIcon: (title: string, filter: string) => invoke<string | null>("pick_icon", { title, filter }),
+  /** A custom (`file:`) icon as a data: URL. */
+  iconImage: (icon: string) => invoke<string>("icon_image", { icon }),
 };
 
 export const SCALE_STEPS = [100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500];

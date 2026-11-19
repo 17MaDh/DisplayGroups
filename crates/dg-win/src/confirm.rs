@@ -28,6 +28,9 @@ pub struct CountdownDialog {
     pub keep: String,
     pub revert: String,
     pub dark: bool,
+    /// Right-to-left language: the window is mirrored (buttons swap sides) and text
+    /// reads from the right.
+    pub rtl: bool,
 }
 
 impl CountdownDialog {
@@ -39,6 +42,7 @@ impl CountdownDialog {
             keep: "Keep changes".into(),
             revert: "Revert".into(),
             dark,
+            rtl: false,
         }
     }
 }
@@ -111,8 +115,9 @@ fn run(texts: &CountdownDialog, seconds: u32, group: &str) -> bool {
         let y = work.top + (work.bottom - work.top - h) / 2;
 
         let title = wide(&texts.title);
+        let mirrored = if texts.rtl { WS_EX_LAYOUTRTL } else { 0 };
         let hwnd = CreateWindowExW(
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | mirrored,
             class.as_ptr(),
             title.as_ptr(),
             WS_POPUP,
@@ -301,6 +306,8 @@ fn paint(hwnd: HWND) {
         GetClientRect(hwnd, &mut rc);
 
         let dark = texts.dark;
+        // The DC of a mirrored window already right-aligns; this sets the bidi order.
+        let reading = if texts.rtl { DT_RTLREADING } else { 0 };
         let bg = if dark {
             rgb(43, 43, 43)
         } else {
@@ -365,7 +372,7 @@ fn paint(hwnd: HWND) {
             hdc,
             &texts.title,
             &mut r,
-            DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+            DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX | reading,
         );
         SelectObject(hdc, old);
         DeleteObject(title_font);
@@ -383,7 +390,7 @@ fn paint(hwnd: HWND) {
             right: rc.right - s(24),
             bottom: keep_rc.top - s(8),
         };
-        text(hdc, &body, &mut r, DT_WORDBREAK | DT_NOPREFIX);
+        text(hdc, &body, &mut r, DT_WORDBREAK | DT_NOPREFIX | reading);
 
         for (button, rect, label) in [
             (Button::Keep, keep_rc, &texts.keep),
@@ -427,7 +434,7 @@ fn paint(hwnd: HWND) {
                 hdc,
                 label,
                 &mut r,
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | reading,
             );
         }
         SelectObject(hdc, old);

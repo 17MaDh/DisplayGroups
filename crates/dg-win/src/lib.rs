@@ -14,6 +14,7 @@ mod display;
 mod ffi;
 mod ffi_ui;
 pub mod icons;
+pub mod identify;
 pub mod integration;
 pub mod osd;
 pub mod shell;

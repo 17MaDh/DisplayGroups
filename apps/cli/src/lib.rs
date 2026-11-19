@@ -74,6 +74,7 @@ pub fn main_entry(console: bool) -> i32 {
         console,
         json: cli.json,
         dark: false,
+        rtl: false,
     };
     match run(cli, out) {
         Ok(code) => code,
@@ -115,6 +116,7 @@ fn run(cli: Cli, out: Output) -> Result<i32, CliError> {
     i18n::init(&settings.language);
     let out = Output {
         dark: prefers_dark(settings.theme),
+        rtl: i18n::is_rtl(),
         ..out
     };
     tracing::info!(command = ?cli.command, config = %ctx.config_path.display(), "start");

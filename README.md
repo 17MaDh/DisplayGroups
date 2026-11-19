@@ -35,8 +35,14 @@ position, rotation, scale and HDR. It can also set the sound output and volume.
   - A drag-and-drop layout editor, with resolution and refresh pickers from the modes each
     monitor really offers.
   - Pages for hotkeys, shortcuts, theme (System/Dark/Light), import/export and diagnostics.
-- **Shortcuts:** desktop or Start menu shortcuts that switch to a group, with built-in or custom
-  icons.
+- **Identify:** shows each screen's number and name on that screen, matching the numbers in the
+  layout editor.
+- **Shortcuts:** desktop or Start menu shortcuts that switch to a group, with built-in icons or
+  your own `.ico`/`.png`.
+- **Languages:** English and Arabic, with a right-to-left layout in the settings app, the tray,
+  the on-screen display and the confirmation dialog.
+  - By default the app follows the Windows display language.
+  - Another language is one JSON file ([CONTRIBUTING.md](CONTRIBUTING.md#translations)).
 - **Links:** `displaygroups://` links for Stream Deck and automation tools (opt-in).
 - **Disconnect fallback:** optionally switches to a fallback group when a display disappears.
 - **Before/after actions** (off by default): run a program or command as you, never as a
@@ -106,6 +112,7 @@ console window (use it in shortcuts). Groups can be named or given by id.
 | `displaygroups toggle "Desktop" "Gaming on Couch"` | Switches to whichever of these is not on screen now |
 | `displaygroups validate "Desktop"` | Asks Windows whether the group can be applied, **without changing anything** |
 | `displaygroups list` / `status` | Shows groups and monitors / what is on screen |
+| `displaygroups identify [--seconds 3]` | Shows each display's number and name on that display |
 | `displaygroups duplicate "Desktop"` | Copies a group |
 | `displaygroups recover [--extend]` | Restores the last layout that worked (or extends all displays) |
 | `displaygroups shortcut "Gaming on Couch" [--desktop] [--start-menu] [--icon builtin:couch]` | Creates a shortcut that switches to the group. Built-in icons: `monitor`, `couch`, `dual`, `gaming`, `work`; or a `.ico`/`.png` file |

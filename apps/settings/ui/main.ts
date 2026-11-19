@@ -153,7 +153,7 @@ function render(): void {
   }
   if (language !== appliedLanguage) {
     appliedLanguage = language;
-    void setLanguage(language).then(() => {
+    void setLanguage(language, state.platform.systemLanguage).then(() => {
       if (appliedLanguage === language) render();
     });
   }
@@ -183,7 +183,7 @@ async function main(): Promise<void> {
   appliedTheme = state.config.settings.theme;
   applyTheme(appliedTheme);
   appliedLanguage = state.config.settings.language;
-  await setLanguage(appliedLanguage);
+  await setLanguage(appliedLanguage, state.platform.systemLanguage);
   subscribe(render);
   render();
 

@@ -230,10 +230,12 @@ fn build(items: &[MenuItem]) -> HANDLE {
     }
 }
 
-/// Shows the menu at the cursor and returns the chosen command id.
-pub fn show_menu(window: &AgentWindow, items: &[MenuItem]) -> Option<u32> {
+/// Shows the menu at the cursor and returns the chosen command id. `rtl` lays it out
+/// right to left (Arabic, Hebrew).
+pub fn show_menu(window: &AgentWindow, items: &[MenuItem], rtl: bool) -> Option<u32> {
     let hwnd = window.hwnd();
     let menu = build(items);
+    let layout = if rtl { TPM_LAYOUTRTL } else { 0 };
     // SAFETY: the window must be foreground for the menu to close when clicking away.
     let chosen = unsafe {
         let mut pt = POINT::default();
@@ -241,7 +243,7 @@ pub fn show_menu(window: &AgentWindow, items: &[MenuItem]) -> Option<u32> {
         SetForegroundWindow(hwnd);
         let id = TrackPopupMenu(
             menu,
-            TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY,
+            TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY | layout,
             pt.x,
             pt.y,
             0,

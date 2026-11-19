@@ -1,10 +1,11 @@
 // Groups: list (reorder, duplicate, delete with undo) and the group editor.
 
 import { api, SCALE_STEPS, type Action, type DisplaySetting, type Group, type ModeOption, type Rotation } from "../api";
-import { field, h, icon, numberInput, select, toggle } from "../dom";
+import { field, h, icon, ltr, numberInput, select, toggle } from "../dom";
 import { t } from "../i18n";
+import { iconTile } from "../icons";
 import { saveNow, toast } from "../main";
-import { changed, dirty, iconGlyph, monitorName, reload, state } from "../state";
+import { changed, dirty, monitorName, monitorNumber, reload, state } from "../state";
 import { layoutCanvas, makePrimary } from "./canvas";
 
 const modeCache = new Map<string, ModeOption[] | string>();
@@ -22,8 +23,26 @@ function summary(g: Group): string {
 }
 
 function tile(iconName: string): HTMLElement {
-  const { glyph, color } = iconGlyph(iconName);
-  return h("span", { class: "tile", style: `background:${color}` }, icon(glyph));
+  return iconTile(iconName);
+}
+
+/** "Choose file…": the Windows Open dialog; the file is copied into the icons folder. */
+async function pickIcon(g: Group): Promise<void> {
+  try {
+    const value = await api.pickIcon(t("icons.pickTitle"), t("icons.filter"));
+    if (value) {
+      g.icon = value;
+      changed();
+    }
+  } catch (e) {
+    toast(String(e), "error");
+  }
+}
+
+/** "Identify": each display shows its number and name for a few seconds. */
+async function identify(): Promise<void> {
+  const r = await api.cli({ kind: "identify" });
+  if (!r.ok) toast(r.output || t("common.failed"), "error");
 }
 
 function requireSaved(): boolean {
@@ -55,7 +74,7 @@ function uniqueName(base: string): string {
 function duplicate(g: Group): void {
   const copy = structuredClone(g);
   copy.id = crypto.randomUUID();
-  copy.name = uniqueName(`${g.name} (copy)`);
+  copy.name = uniqueName(t("groups.copyName", { name: g.name }));
   const index = state.config.groups.indexOf(g);
   state.config.groups.splice(index + 1, 0, copy);
   state.selectedGroup = copy.id;
@@ -141,7 +160,7 @@ function modeControls(d: DisplaySetting): HTMLElement[] {
       field(
         t("editor.resolution"),
         select(
-          resolutions.map((r) => [r, r] as [string, string]),
+          resolutions.map((r) => [r, ltr(r)] as [string, string]),
           current,
           (v) => {
             const [w, hgt] = v.split("×").map(Number);
@@ -154,7 +173,7 @@ function modeControls(d: DisplaySetting): HTMLElement[] {
       field(
         t("editor.refresh"),
         select(
-          rates.map((r) => [String(r), `${r} Hz`] as [string, string]),
+          rates.map((r) => [String(r), ltr(`${r} Hz`)] as [string, string]),
           String(currentHz),
           (v) => {
             d.mode.refreshMilliHz = Number(v) * 1000;
@@ -393,14 +412,17 @@ function editor(g: Group): HTMLElement {
           {
             class: "btn icon-only",
             "aria-pressed": String(g.icon === `builtin:${name}`),
-            "aria-label": name,
-            title: name,
-            style: g.icon === `builtin:${name}` ? "border-color:var(--accent)" : "",
+            "aria-label": t(`icons.${name}`),
+            title: t(`icons.${name}`),
             onclick: () => ((g.icon = `builtin:${name}`), changed()),
           },
           tile(`builtin:${name}`),
         ),
       ),
+      g.icon.startsWith("file:")
+        ? h("button", { class: "btn icon-only", "aria-pressed": "true", "aria-label": t("icons.custom"), title: t("icons.custom") }, tile(g.icon))
+        : null,
+      h("button", { class: "btn", onclick: () => void pickIcon(g) }, icon(""), t("icons.choose")),
       h("span", { class: "spacer" }),
       h(
         "button",
@@ -462,9 +484,11 @@ function editor(g: Group): HTMLElement {
               changed();
             },
           },
-          `${i + 1}. ${monitorName(d.monitor)}`,
+          h("b", { class: "num" }, String(monitorNumber(d.monitor))),
+          monitorName(d.monitor),
         ),
       ),
+      h("button", { class: "btn", title: t("editor.identifyHint"), onclick: () => void identify() }, icon(""), t("editor.identify")),
       missing.length
         ? select(
             [["", t("editor.addDisplay")], ...missing.map((k) => [k, monitorName(k)] as [string, string])],

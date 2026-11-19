@@ -151,6 +151,36 @@ pub fn trim_working_set() {
     unsafe { K32EmptyWorkingSet(GetCurrentProcess()) };
 }
 
+/// The Windows display language as a lowercase language code such as `"ar"` or `"en"`
+/// (the part before the region: `ar-SA` → `ar`). Used for the `"system"` language setting.
+pub fn ui_language() -> String {
+    let mut buf = [0u16; 85]; // LOCALE_NAME_MAX_LENGTH
+                              // SAFETY: a LANGID is a valid LCID with the default sort; the buffer length is passed.
+    let len = unsafe {
+        let lcid = u32::from(GetUserDefaultUILanguage());
+        LCIDToLocaleName(lcid, buf.as_mut_ptr(), buf.len() as i32, 0)
+    };
+    if len <= 1 {
+        return "en".to_string();
+    }
+    let name = String::from_utf16_lossy(&buf[..len as usize - 1]);
+    language_code(&name)
+}
+
+/// `"ar-SA"` → `"ar"`; anything unusable → `"en"`.
+pub fn language_code(locale: &str) -> String {
+    let code = locale
+        .split(['-', '_'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if (2..=3).contains(&code.len()) && code.chars().all(|c| c.is_ascii_lowercase()) {
+        code
+    } else {
+        "en".to_string()
+    }
+}
+
 /// Current working set of this process in bytes.
 pub fn working_set_bytes() -> Option<usize> {
     let mut c = PROCESS_MEMORY_COUNTERS {
@@ -165,6 +195,18 @@ pub fn working_set_bytes() -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn language_codes() {
+        assert_eq!(language_code("ar-SA"), "ar");
+        assert_eq!(language_code("en-US"), "en");
+        assert_eq!(language_code("zh-Hans-CN"), "zh");
+        assert_eq!(language_code("fil"), "fil");
+        assert_eq!(language_code(""), "en");
+        assert_eq!(language_code("x-y"), "en");
+        let ui = ui_language();
+        assert!((2..=3).contains(&ui.len()), "{ui}");
+    }
 
     #[test]
     fn single_instance_is_exclusive() {

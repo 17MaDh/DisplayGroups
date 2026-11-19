@@ -76,7 +76,17 @@ struct Platform {
     mica: bool,
     build: u32,
     version: String,
-    languages: Vec<String>,
+    /// English first, then every `locales\<code>.json`, with its own name for itself.
+    languages: Vec<Language>,
+    /// What the `"system"` setting resolves to (the Windows display language).
+    system_language: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Language {
+    code: String,
+    name: String,
 }
 
 #[derive(Serialize)]
@@ -117,6 +127,33 @@ enum CliCommand {
     Protocol {
         on: bool,
     },
+    Identify,
+}
+
+/// `locales` next to the executable. Debug builds fall back to the repository's
+/// folder, so translations can be tried without copying files.
+fn locales_dir(app: &App) -> PathBuf {
+    let beside = app.exe_dir.join("locales");
+    if beside.is_dir() || !cfg!(debug_assertions) {
+        beside
+    } else {
+        PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../locales"))
+    }
+}
+
+fn valid_language_code(code: &str) -> bool {
+    !code.is_empty()
+        && code.len() <= 16
+        && code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+fn read_locale(app: &App, code: &str) -> Result<HashMap<String, String>, String> {
+    if !valid_language_code(code) {
+        return Err("invalid language code".into());
+    }
+    let path = locales_dir(app).join(format!("{code}.json"));
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
 fn issues_have_errors(issues: &[Issue]) -> bool {
@@ -126,39 +163,43 @@ fn issues_have_errors(issues: &[Issue]) -> bool {
 #[tauri::command]
 fn platform(app: State<App>) -> Platform {
     let build = dg_win::system::windows_build();
-    let mut languages = vec!["en".to_string()];
-    if let Ok(dir) = std::fs::read_dir(app.exe_dir.join("locales")) {
-        for entry in dir.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "json") {
-                if let Some(stem) = path.file_stem().map(|s| s.to_string_lossy().into_owned()) {
-                    if stem != "en" {
-                        languages.push(stem);
-                    }
+    let mut languages = vec![Language {
+        code: "en".into(),
+        name: "English".into(),
+    }];
+    if let Ok(dir) = std::fs::read_dir(locales_dir(&app)) {
+        let mut found: Vec<Language> = dir
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|e| e == "json"))
+            .filter_map(|path| {
+                let code = path.file_stem()?.to_string_lossy().into_owned();
+                if code == "en" || !valid_language_code(&code) {
+                    return None;
                 }
-            }
-        }
+                let name = read_locale(&app, &code)
+                    .ok()
+                    .and_then(|m| m.get("language.name").cloned())
+                    .unwrap_or_else(|| code.clone());
+                Some(Language { code, name })
+            })
+            .collect();
+        found.sort_by(|a, b| a.code.cmp(&b.code));
+        languages.extend(found);
     }
     Platform {
         mica: build >= 22000,
         build,
         version: env!("CARGO_PKG_VERSION").to_string(),
         languages,
+        system_language: dg_win::system::ui_language(),
     }
 }
 
 /// Strings for a language other than English (English is bundled with the UI).
 #[tauri::command]
 fn locale(app: State<App>, language: String) -> Result<HashMap<String, String>, String> {
-    if !language
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-')
-    {
-        return Err("invalid language code".into());
-    }
-    let path = app.exe_dir.join("locales").join(format!("{language}.json"));
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    serde_json::from_str(&text).map_err(|e| e.to_string())
+    read_locale(&app, &language)
 }
 
 #[tauri::command]
@@ -355,6 +396,7 @@ async fn run_cli(app: State<'_, App>, command: CliCommand) -> Result<CliResult, 
         }
         CliCommand::Startup { on } => args.extend(["startup".into(), toggle(on)]),
         CliCommand::Protocol { on } => args.extend(["protocol".into(), toggle(on)]),
+        CliCommand::Identify => args.push("identify".into()),
     }
     let exe = app.exe_dir.join("displaygroups.exe");
     let config = app.paths.config_file.clone();
@@ -397,6 +439,55 @@ fn apply_group(app: State<App>, id: Uuid) -> Result<(), String> {
         .spawn()
         .map(drop)
         .map_err(|e| format!("{}: {e}", exe.display()))
+}
+
+/// "Choose file…" for a group icon: the Windows Open dialog, then the file is stored in
+/// the icons folder as `.ico`. Returns the value for `group.icon`; `None` if cancelled.
+#[tauri::command]
+fn pick_icon(
+    app: State<App>,
+    window: tauri::WebviewWindow,
+    title: String,
+    filter: String,
+) -> Result<Option<String>, String> {
+    let owner = window.hwnd().map(|h| h.0 as isize).unwrap_or(0);
+    let Some(source) = dg_win::ui::pick_file(owner, &title, &filter, "*.ico;*.png")? else {
+        return Ok(None);
+    };
+    let (file, ico) = dg_win::icons::import_file(&source)?;
+    store::write_atomic(&app.paths.icons_dir.join(&file), &ico).map_err(|e| e.to_string())?;
+    Ok(Some(format!("file:{file}")))
+}
+
+/// A custom group icon (`file:…`) as a `data:` URL; built-in icons are font glyphs.
+#[tauri::command]
+fn icon_image(app: State<App>, icon: String) -> Result<String, String> {
+    let name = icon.strip_prefix("file:").ok_or("not a custom icon")?;
+    let file = std::path::Path::new(name)
+        .file_name()
+        .ok_or("invalid icon name")?;
+    let path = app.paths.icons_dir.join(file);
+    let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(format!("data:image/x-icon;base64,{}", base64(&bytes)))
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, &b)| n | (u32::from(b) << (16 - 8 * i)));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ABC[((n >> (18 - 6 * i)) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }
 
 /// Built-in icon names and their glyphs, so the UI shows the same symbols as the OSD.
@@ -476,7 +567,39 @@ fn main() {
             run_cli,
             apply_group,
             builtin_icons,
+            pick_icon,
+            icon_image,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| dg_win::ui::show_error("DisplayGroups", &e.to_string()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_matches_rfc_4648() {
+        for (input, expected) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64(input.as_bytes()), expected);
+        }
+        assert_eq!(base64(&[0xFF, 0xEF]), "/+8=");
+    }
+
+    #[test]
+    fn language_codes_are_checked() {
+        assert!(valid_language_code("ar"));
+        assert!(valid_language_code("pt-BR"));
+        assert!(!valid_language_code(""));
+        assert!(!valid_language_code("..\\x"));
+        assert!(!valid_language_code("ar/../../secret"));
+    }
 }

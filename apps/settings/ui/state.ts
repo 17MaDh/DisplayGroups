@@ -79,6 +79,16 @@ export function monitorName(key: string): string {
   return state.config.monitors[key]?.displayName ?? key;
 }
 
+/**
+ * The number "Identify" shows on this monitor: its position among the config's
+ * monitors ordered by key (as `Config::monitor_number` in dg-model), from 1.
+ */
+export function monitorNumber(key: string): number {
+  const keys = Object.keys(state.config.monitors).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const i = keys.indexOf(key);
+  return i < 0 ? keys.length + 1 : i + 1;
+}
+
 export function iconGlyph(icon: string): { glyph: string; color: string } {
   const name = icon.startsWith("builtin:") ? icon.slice(8) : "monitor";
   const [glyph, color] = (state.icons[name] ?? state.icons["monitor"] ?? "|#2563eb").split("|");

@@ -1,5 +1,6 @@
 {
   "app.name": "DisplayGroups",
+  "language.name": "English",
 
   "confirm.title": "Keep these display settings?",
   "confirm.body": "Switched to “{group}”. Reverting to the previous layout in {seconds} s.",
@@ -30,6 +31,7 @@
   "common.failed": "Something went wrong.",
   "common.on": "On",
   "common.off": "Off",
+  "common.seconds": "{n} s",
 
   "settings.title": "DisplayGroups",
   "nav.groups": "Groups",
@@ -57,6 +59,7 @@
   "groups.delete": "Delete",
   "groups.deleted": "“{name}” deleted",
   "groups.undo": "Undo",
+  "groups.copyName": "{name} (copy)",
 
   "editor.enabled": "On",
   "editor.primary": "Primary",
@@ -82,6 +85,18 @@
   "editor.audioEndpoint": "Output name contains",
   "editor.volume": "Volume",
   "editor.actions": "Actions",
+  "editor.identify": "Identify",
+  "editor.identifyHint": "Show each display's number on that display for a few seconds",
+
+  "icons.monitor": "Monitor",
+  "icons.couch": "Couch",
+  "icons.dual": "Two screens",
+  "icons.gaming": "Gaming",
+  "icons.work": "Work",
+  "icons.custom": "Custom icon",
+  "icons.choose": "Choose file…",
+  "icons.pickTitle": "Choose an icon for this group",
+  "icons.filter": "Icons",
 
   "rotation.landscape": "Landscape",
   "rotation.portrait": "Portrait",
@@ -127,6 +142,7 @@
   "settings.theme": "Theme",
   "settings.language": "Language",
   "settings.languageHint": "More languages appear when their file is added to the locales folder.",
+  "settings.languageSystem": "Windows language ({language})",
   "settings.startup": "Start-up",
   "settings.startWithWindows": "Start with Windows",
   "settings.startWithWindowsHint": "Runs the agent (hotkeys, tray, on-screen display) when you sign in.",
@@ -160,5 +176,7 @@
   "diagnostics.notInConfig": "not in any group",
   "diagnostics.noStatus": "Display information is not available right now.",
   "diagnostics.problems": "Configuration problems",
-  "diagnostics.noProblems": "None."
+  "diagnostics.noProblems": "None.",
+  "diagnostics.version": "DisplayGroups {version} · Windows build {build}",
+  "diagnostics.portable": "portable"
 }

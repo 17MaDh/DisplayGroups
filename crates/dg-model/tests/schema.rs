@@ -121,6 +121,23 @@ fn duplicate_group_copies_under_new_name_and_id() {
 }
 
 #[test]
+fn monitor_numbers_follow_key_order() {
+    let mut cfg = store::parse(EXAMPLE).unwrap();
+    let first = cfg.monitors.keys().next().unwrap().clone();
+    assert_eq!(cfg.monitor_number(&first), Some(1));
+    assert_eq!(cfg.monitor_number("no such monitor"), None);
+    let entry = cfg.monitors[&first].clone();
+    cfg.monitors.insert("0000-first".into(), entry);
+    assert_eq!(cfg.monitor_number("0000-first"), Some(1));
+    assert_eq!(cfg.monitor_number(&first), Some(2));
+}
+
+#[test]
+fn language_defaults_to_the_windows_language() {
+    assert_eq!(Config::default().settings.language, "system");
+}
+
+#[test]
 fn find_group_by_name_or_id() {
     let cfg = store::parse(EXAMPLE).unwrap();
     assert!(cfg.find_group("  gaming ON couch ").is_some());

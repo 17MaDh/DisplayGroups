@@ -74,6 +74,29 @@ pub fn png_to_ico(png: &[u8]) -> Result<Vec<u8>, String> {
     Ok(ico_container(&[(w, png.to_vec())]))
 }
 
+/// Reads a custom `.ico` or `.png` for a group and returns the file name to store it
+/// under in the icons folder (`custom-<name>.ico`) and its `.ico` bytes. The caller
+/// writes the file and sets `group.icon` to `file:<file name>`.
+pub fn import_file(source: &std::path::Path) -> Result<(String, Vec<u8>), String> {
+    let bytes = std::fs::read(source).map_err(|e| format!("{}: {e}", source.display()))?;
+    let ext = source
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let ico = match ext.as_str() {
+        "ico" if bytes.len() > 6 && bytes[..4] == [0, 0, 1, 0] => bytes,
+        "ico" => return Err("not an .ico file".into()),
+        "png" => png_to_ico(&bytes)?,
+        _ => return Err("the icon must be a .ico or .png file".into()),
+    };
+    let stem = source
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name = format!("custom-{}.ico", crate::integration::safe_file_name(&stem));
+    Ok((name, ico))
+}
+
 /// The icon font available on this system: Segoe Fluent Icons (Windows 11) or
 /// Segoe MDL2 Assets (Windows 10).
 pub fn icon_font_face() -> String {
@@ -383,5 +406,32 @@ mod tests {
         let ico = png_to_ico(&png).unwrap();
         assert_eq!(ico[6], 64);
         assert!(png_to_ico(b"GIF89a....................").is_err());
+    }
+
+    #[test]
+    fn custom_files_are_imported_as_ico() {
+        let dir = std::env::temp_dir().join(format!("dg-icon-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&32u32.to_be_bytes());
+        png.extend_from_slice(&32u32.to_be_bytes());
+        let png_path = dir.join("Couch TV.png");
+        std::fs::write(&png_path, &png).unwrap();
+        let (name, ico) = import_file(&png_path).unwrap();
+        assert_eq!(name, "custom-Couch TV.ico");
+        assert_eq!(&ico[..4], &[0, 0, 1, 0]);
+
+        let ico_path = dir.join("tv.ico");
+        std::fs::write(&ico_path, render_ico(builtin_style("couch")).unwrap()).unwrap();
+        assert_eq!(import_file(&ico_path).unwrap().0, "custom-tv.ico");
+
+        let fake = dir.join("fake.ico");
+        std::fs::write(&fake, b"not an icon").unwrap();
+        assert!(import_file(&fake).is_err());
+        let gif = dir.join("x.gif");
+        std::fs::write(&gif, b"GIF89a").unwrap();
+        assert!(import_file(&gif).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

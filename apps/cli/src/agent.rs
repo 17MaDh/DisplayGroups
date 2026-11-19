@@ -255,7 +255,7 @@ impl Agent {
         items.push(MenuItem::Separator);
         items.push(MenuItem::command(CMD_EXIT, t("tray.exit")));
 
-        let chosen = show_menu(window, &items);
+        let chosen = show_menu(window, &items, crate::i18n::is_rtl());
         tracing::debug!(?chosen, "tray menu closed");
         match chosen {
             Some(CMD_EXIT) => return false,
@@ -326,8 +326,10 @@ impl Agent {
         }
         if !problems.is_empty() {
             let text = format!(
-                "Some DisplayGroups hotkeys are not active:\n\n{}\n\nChoose other shortcuts in the config.",
-                problems.join("\n")
+                "{}\n\n{}\n\n{}",
+                t("hotkeys.notActive"),
+                problems.join("\n"),
+                t("hotkeys.chooseOther")
             );
             tracing::warn!("{text}");
             if self.out.console {
@@ -341,6 +343,10 @@ impl Agent {
     fn reload(&mut self, window: &AgentWindow) {
         match store::load(&self.ctx.config_path) {
             Ok(loaded) => {
+                if loaded.config.settings.language != self.cfg.settings.language {
+                    crate::i18n::init(&loaded.config.settings.language);
+                    self.out.rtl = crate::i18n::is_rtl();
+                }
                 self.cfg = loaded.config;
                 self.register_hotkeys(window);
                 sync_lock_screen(&self.cfg);
@@ -450,6 +456,7 @@ impl Agent {
                 title: title.to_string(),
                 detail: detail.to_string(),
                 dark,
+                rtl: crate::i18n::is_rtl(),
             },
             settings.osd.duration_ms,
         );

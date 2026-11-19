@@ -3,8 +3,9 @@
 import { api } from "../api";
 import { h, icon } from "../dom";
 import { t } from "../i18n";
+import { iconTile } from "../icons";
 import { toast } from "../main";
-import { iconGlyph, state } from "../state";
+import { state } from "../state";
 
 async function create(id: string, desktop: boolean, startMenu: boolean): Promise<void> {
   const saved = state.saved.includes(id);
@@ -23,11 +24,10 @@ export function renderShortcuts(): HTMLElement {
     h("h2", {}, t("nav.shortcuts")),
     h("p", { class: "muted" }, t("shortcuts.intro")),
     ...state.config.groups.map((g) => {
-      const { glyph, color } = iconGlyph(g.icon);
       return h(
         "div",
         { class: "setting" },
-        h("span", { class: "tile", style: `background:${color};display:grid;place-items:center;inline-size:32px;block-size:32px;border-radius:7px;color:#fff` }, icon(glyph)),
+        iconTile(g.icon),
         h("span", { class: "text" }, g.name, h("small", {}, t("shortcuts.target", { name: g.name }))),
         h("button", { class: "btn", onclick: () => void create(g.id, true, false) }, icon(""), t("shortcuts.desktop")),
         h("button", { class: "btn", onclick: () => void create(g.id, false, true) }, icon(""), t("shortcuts.startMenu")),

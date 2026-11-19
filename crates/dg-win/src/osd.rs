@@ -23,6 +23,8 @@ pub struct OsdContent {
     pub title: String,
     pub detail: String,
     pub dark: bool,
+    /// Right-to-left language: the icon goes on the right and text reads from the right.
+    pub rtl: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,15 +260,35 @@ fn paint(hwnd: HWND) {
             DeleteObject(brush);
             SetBkMode(hdc, TRANSPARENT);
 
-            let text_left = if c.glyph.is_some() { s(84) } else { s(24) };
+            // Text runs between `text_start` and `text_end`, measured from the leading
+            // edge (left, or right for RTL); the icon sits on the leading edge.
+            let text_start = if c.glyph.is_some() { s(84) } else { s(24) };
+            let text_end = s(20);
+            // The title is text in the UI language; the detail ("3840 × 2160 · 120 Hz")
+            // is technical and keeps left-to-right order, only aligned to the right.
+            let (text_left, text_right, title_align, detail_align) = if c.rtl {
+                (
+                    text_end,
+                    rc.right - text_start,
+                    DT_RIGHT | DT_RTLREADING,
+                    DT_RIGHT,
+                )
+            } else {
+                (text_start, rc.right - text_end, 0, 0)
+            };
             if let Some(g) = c.glyph {
                 let font = font(s(30), 400, "Segoe Fluent Icons");
                 let old = SelectObject(hdc, font);
                 SetTextColor(hdc, fg);
+                let (left, right) = if c.rtl {
+                    (rc.right - s(76), rc.right - s(20))
+                } else {
+                    (s(20), s(76))
+                };
                 let mut r = RECT {
-                    left: s(20),
+                    left,
                     top: 0,
-                    right: s(76),
+                    right,
                     bottom: rc.bottom,
                 };
                 draw(
@@ -284,14 +306,14 @@ fn paint(hwnd: HWND) {
             let mut r = RECT {
                 left: text_left,
                 top: s(18),
-                right: rc.right - s(20),
+                right: text_right,
                 bottom: s(48),
             };
             draw(
                 hdc,
                 &c.title,
                 &mut r,
-                DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX | title_align,
             );
             SelectObject(hdc, old);
             DeleteObject(title);
@@ -302,14 +324,14 @@ fn paint(hwnd: HWND) {
             let mut r = RECT {
                 left: text_left,
                 top: s(50),
-                right: rc.right - s(20),
+                right: text_right,
                 bottom: s(76),
             };
             draw(
                 hdc,
                 &c.detail,
                 &mut r,
-                DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX | detail_align,
             );
             SelectObject(hdc, old);
             DeleteObject(detail);
@@ -318,7 +340,7 @@ fn paint(hwnd: HWND) {
     }
 }
 
-fn font(height: i32, weight: i32, face: &str) -> HANDLE {
+pub(crate) fn font(height: i32, weight: i32, face: &str) -> HANDLE {
     let face = wide(face);
     // SAFETY: creates a logical font; the caller deletes it.
     unsafe {
@@ -341,7 +363,7 @@ fn font(height: i32, weight: i32, face: &str) -> HANDLE {
     }
 }
 
-fn draw(hdc: HANDLE, text: &str, rect: &mut RECT, format: u32) {
+pub(crate) fn draw(hdc: HANDLE, text: &str, rect: &mut RECT, format: u32) {
     let w: Vec<u16> = text.encode_utf16().collect();
     // SAFETY: explicit length, so no NUL terminator is needed.
     unsafe { DrawTextW(hdc, w.as_ptr(), w.len() as i32, rect, format) };

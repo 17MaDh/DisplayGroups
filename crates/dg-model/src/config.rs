@@ -76,6 +76,15 @@ impl Config {
         self.groups.iter_mut().find(|g| g.id == id)
     }
 
+    /// The number a monitor shows in "Identify" and in the layout editor: its position
+    /// among the config's monitors (ordered by key), from 1. The same in every group.
+    pub fn monitor_number(&self, key: &str) -> Option<u32> {
+        self.monitors
+            .keys()
+            .position(|k| k == key)
+            .map(|i| u32::try_from(i + 1).unwrap_or(u32::MAX))
+    }
+
     /// Returns `base` if no group uses that name yet, otherwise `base 2`, `base 3`, ...
     pub fn unique_group_name(&self, base: &str) -> String {
         let taken = |n: &str| self.groups.iter().any(|g| names_equal(&g.name, n));
@@ -418,7 +427,8 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: Theme::System,
-            language: "en".to_string(),
+            // Follows the Windows display language when a translation exists.
+            language: "system".to_string(),
             start_with_windows: false,
             start_minimized: true,
             osd: Osd::default(),

@@ -7,18 +7,26 @@ import { api } from "./api";
 const RTL = new Set(["ar", "he", "fa", "ur"]);
 let strings: Record<string, string> = { ...en };
 
-export async function setLanguage(language: string): Promise<void> {
+/**
+ * Loads the strings for a language setting. "system" means the Windows display
+ * language (`system`, from the platform info). The page switches to right-to-left only
+ * when that language's file was actually loaded.
+ */
+export async function setLanguage(setting: string, system: string): Promise<void> {
+  const wanted = !setting || setting === "system" ? system || "en" : setting;
   strings = { ...en };
-  if (language && language !== "en") {
+  let loaded = "en";
+  if (wanted !== "en") {
     try {
-      Object.assign(strings, await api.locale(language));
+      Object.assign(strings, await api.locale(wanted));
+      loaded = wanted;
     } catch {
       // Missing file: stay in English.
     }
   }
   const root = document.documentElement;
-  root.lang = language || "en";
-  root.dir = RTL.has(language) ? "rtl" : "ltr";
+  root.lang = loaded;
+  root.dir = RTL.has(loaded) ? "rtl" : "ltr";
 }
 
 /** `t("groups.deleted", { name })` replaces `{name}`. Unknown keys return the key. */
