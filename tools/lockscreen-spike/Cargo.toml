@@ -1,0 +1,15 @@
+[package]
+name = "lockscreen-spike"
+description = "Go/no-go spike for lock-screen hotkeys (ARCHITECTURE.md §8.5). Test machines only."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+dg-engine.workspace = true
+dg-win.workspace = true
+
+[lints]
+workspace = true

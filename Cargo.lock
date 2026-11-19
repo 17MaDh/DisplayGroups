@@ -154,12 +154,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "dg-hotkey"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "dg-identity"
 version = "0.1.0"
 dependencies = [
  "dg-model",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "dg-ipc"
+version = "0.1.0"
+dependencies = [
+ "dg-hotkey",
+ "dg-model",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -188,6 +207,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "dg-engine",
+ "dg-hotkey",
+ "dg-ipc",
  "dg-model",
  "dg-win",
  "serde",
@@ -302,6 +323,14 @@ name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
+
+[[package]]
+name = "lockscreen-spike"
+version = "0.1.0"
+dependencies = [
+ "dg-engine",
+ "dg-win",
+]
 
 [[package]]
 name = "log"

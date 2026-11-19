@@ -5,6 +5,21 @@
 > `capture`, `list` and `validate`. Real switching (`apply`, `toggle`, `recover`) has not been run
 > on hardware yet; per D3 that happens on a VM or secondary PC.
 >
+> **Phase 3 in progress.**
+> - **Done:**
+>   - `dg-hotkey`: chord parsing and the reserved/known-conflict tables.
+>   - The agent: hotkeys with a live conflict probe, the OSD, config hot reload, the disconnect
+>     fallback and single-instance.
+>   - `dg-ipc`: protocol, framing and the secured pipe with caller identity.
+>   - The §8.5 spike tool.
+>   - 86 automated tests pass.
+> - **Checked on the test machine in `--dry-run`, displays unchanged:**
+>   - hotkey → OSD → fade-out;
+>   - the switch broadcast → OSD;
+>   - conflict detection, which reported `Ctrl+Alt+F12` as held by the old PowerShell agent;
+>   - live reload, single instance and clean shutdown.
+> - **Waiting on the §8.5 spike result:** the lock-screen service and broker.
+>
 > Items marked **[VERIFIED]** were observed on real hardware (Windows 11 26H2 build 26300, RTX 5080,
 > ASUS XG32UCWMG + DFI27280 + Samsung 65" TV over HDMI) while building the PowerShell prototype this
 > project replaces. Items marked **[SPIKE]** are unproven and get a go/no-go test before code depends on them.
@@ -108,6 +123,7 @@ DisplayGroups/
 ├─ installer/nsis/               # per-machine installer, optional service + URI components (Phase 5)
 ├─ packaging/portable/           # portable ZIP layout + portable.flag                        (Phase 5)
 ├─ scripts/                      # build.ps1, sign.ps1 (no-op without secrets)
+├─ tools/lockscreen-spike/       # §8.5 go/no-go test; test machines only (docs/lockscreen-spike.md)
 ├─ .github/workflows/            # ci.yml (push/PR), release.yml (tags)
 ├─ docs/                         # CLI reference, troubleshooting
 └─ README.md  ARCHITECTURE.md  CONTRIBUTING.md  SECURITY.md  LICENSE
@@ -393,6 +409,9 @@ that could observe other keys, such as a password typed on the lock screen.
 
 If (2) fails, lock-screen hotkeys ship disabled and documented. There is no fallback to hooks.
 
+Tool: `tools/lockscreen-spike`; steps in `docs/lockscreen-spike.md`. The broker it starts calls
+`SetDisplayConfig` with `SDC_VALIDATE` only, so the spike never changes the displays.
+
 ---
 
 ## 9. Settings UI (Phase 4)
@@ -495,12 +514,25 @@ If (2) fails, lock-screen hotkeys ship disabled and documented. There is no fall
 
 | Process | Target | When |
 |---|---|---|
-| Agent (`displaygroupsw.exe agent`, incl. OSD) | ≤ 10 MB working set | always (tray) |
+| Agent (`displaygroupsw.exe agent`, incl. OSD) | ≤ 10 MB private bytes | always (tray) |
 | Service | ≤ 5 MB | only when installed and a lock-screen chord exists |
 | Broker | ≤ 8 MB | only while locked |
 | Settings (Tauri + WebView2) | ~80–150 MB | only while open; the process exits on close |
 
-CI measures the agent's working set after start-up and fails the build above 15 MB (Phase 3).
+**Measured (release build, test machine, 2026-11-19) [VERIFIED]:**
+
+| State | Private bytes | Working set |
+|---|---|---|
+| Idle | 6.4 MB | ~0.5 MB |
+| While the OSD shows | 6.4 MB | 3.5 MB |
+
+- The binary is ~2 MB.
+- Before trimming, the working set was ~20 MB. Almost all of it was shared Windows DLL pages
+  loaded by window creation and font rendering.
+- The agent therefore trims its working set (`K32EmptyWorkingSet`) whenever it goes idle: after
+  start-up, and after each switch once the OSD has faded.
+- Private bytes is the budgeted figure, because it is the memory the agent really holds.
+- An automated CI check is still to do: it needs an interactive desktop session on the runner.
 
 ---
 

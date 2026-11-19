@@ -1,5 +1,6 @@
 //! Shared implementation of `displaygroups.exe` and `displaygroupsw.exe`.
 
+mod agent;
 mod args;
 mod commands;
 mod logging;
@@ -46,6 +47,7 @@ impl CliError {
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_REVERTED: i32 = 3;
 
+#[derive(Clone)]
 pub(crate) struct Ctx {
     pub paths: AppPaths,
     pub config_path: PathBuf,

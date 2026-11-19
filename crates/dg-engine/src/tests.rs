@@ -174,6 +174,7 @@ fn declining_the_countdown_reverts_layout_and_scale() {
     let opts = ApplyOptions {
         confirm_seconds: 15,
         confirmer: Some(&answer),
+        on_applied: None,
     };
     let report = Engine::new(&fake)
         .apply(&cfg, cfg.group_by_id(COUCH_GROUP).unwrap(), &opts)
@@ -197,12 +198,43 @@ fn keeping_the_countdown_keeps_the_layout() {
     let opts = ApplyOptions {
         confirm_seconds: 15,
         confirmer: Some(&answer),
+        on_applied: None,
     };
     let report = Engine::new(&fake)
         .apply(&cfg, cfg.group_by_id(COUCH_GROUP).unwrap(), &opts)
         .unwrap();
     assert!(report.kept);
     assert_eq!(fake.active_names(), ["SAMSUNG"]);
+}
+
+#[test]
+fn on_applied_fires_before_the_confirmation() {
+    let fake = rig();
+    let cfg = rig_config();
+    let seen = Cell::new(None);
+    let order = std::cell::RefCell::new(Vec::new());
+    struct Recorder<'a>(&'a std::cell::RefCell<Vec<&'static str>>);
+    impl Confirmer for Recorder<'_> {
+        fn confirm(&self, _: u32, _: &str) -> bool {
+            self.0.borrow_mut().push("confirm");
+            true
+        }
+    }
+    let confirmer = Recorder(&order);
+    let callback = |p: Option<crate::PrimaryInfo>| {
+        seen.set(p);
+        order.borrow_mut().push("applied");
+    };
+    let opts = ApplyOptions {
+        confirm_seconds: 15,
+        confirmer: Some(&confirmer),
+        on_applied: Some(&callback),
+    };
+    Engine::new(&fake)
+        .apply(&cfg, cfg.group_by_id(COUCH_GROUP).unwrap(), &opts)
+        .unwrap();
+    assert_eq!(*order.borrow(), ["applied", "confirm"]);
+    assert_eq!(seen.get().unwrap().refresh_milli_hz, Some(120_000));
 }
 
 #[test]

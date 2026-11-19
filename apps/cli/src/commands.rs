@@ -18,9 +18,11 @@ use crate::{CliError, Ctx, EXIT_OK, EXIT_REVERTED};
 
 /// What started a switch; URI switches are restricted (ARCHITECTURE.md §11.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Trigger {
+pub(crate) enum Trigger {
     Cli,
     Uri,
+    Hotkey,
+    Fallback,
 }
 
 /// Minimum gap between two `displaygroups://` switches.
@@ -47,10 +49,11 @@ pub(crate) fn dispatch(
         Command::Duplicate { group } => duplicate(ctx, &mut cfg, &group, out),
         Command::Recover { extend } => recover(ctx, extend, out),
         Command::Uri { url } => handle_uri(ctx, &cfg, &url, out),
+        Command::Agent { dry_run } => crate::agent::run(ctx, cfg, dry_run, out),
     }
 }
 
-fn find<'a>(cfg: &'a Config, key: &str) -> Result<&'a Group, CliError> {
+pub(crate) fn find<'a>(cfg: &'a Config, key: &str) -> Result<&'a Group, CliError> {
     if cfg.groups.is_empty() {
         return Err(CliError::Config(
             "There are no groups yet. Arrange your displays the way you like, then run:\n  \
@@ -88,7 +91,7 @@ fn ensure_valid(cfg: &Config, group: &Group) -> Result<(), CliError> {
     }
 }
 
-fn apply(
+pub(crate) fn apply(
     ctx: &Ctx,
     cfg: &Config,
     group: &Group,
@@ -109,6 +112,11 @@ fn apply(
     }
 
     let confirmer = out.confirmer();
+    // Show the OSD as soon as the new layout is visible, before "Keep these settings?".
+    let announce = |primary: Option<PrimaryInfo>| {
+        write_last_switch(ctx, group, primary);
+        dg_win::agent::notify_switched();
+    };
     let opts = ApplyOptions {
         confirm_seconds: if no_confirm {
             0
@@ -116,7 +124,9 @@ fn apply(
             group.safety.confirm_seconds
         },
         confirmer: Some(confirmer.as_ref()),
+        on_applied: Some(&announce),
     };
+    tracing::info!(group = %group.name, ?trigger, "applying");
     let report = engine.apply(cfg, group, &opts)?;
     tracing::info!(report = ?report, "apply finished");
 
@@ -127,8 +137,6 @@ fn apply(
         ) {
             out.warn(format!("could not save the last-known-good layout: {e}"));
         }
-        write_last_switch(ctx, group, report.primary);
-        dg_win::agent::notify_switched();
         if actions {
             run_actions(&group.actions.after, out);
         }
@@ -151,7 +159,7 @@ fn ensure_lkg(ctx: &Ctx, display: &WinBackend) {
     }
 }
 
-fn toggle(
+pub(crate) fn toggle(
     ctx: &Ctx,
     cfg: &Config,
     keys: &[String],
@@ -369,7 +377,7 @@ fn duplicate(ctx: &Ctx, cfg: &mut Config, key: &str, out: Output) -> Result<i32,
     Ok(EXIT_OK)
 }
 
-fn recover(ctx: &Ctx, extend: bool, out: Output) -> Result<i32, CliError> {
+pub(crate) fn recover(ctx: &Ctx, extend: bool, out: Output) -> Result<i32, CliError> {
     let snapshot: Option<Snapshot> = store::read_json(&ctx.paths.lkg_file())?;
     let display = WinBackend::new();
     let method = Engine::new(&display).recover(snapshot.as_ref(), extend)?;
@@ -444,21 +452,22 @@ fn run_actions(actions: &[Action], out: Output) {
     }
 }
 
-#[derive(Serialize)]
+/// `state\last-switch.json`: what the agent shows in the OSD.
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LastSwitch<'a> {
-    group_id: Uuid,
-    group_name: &'a str,
-    icon: &'a str,
-    primary: Option<PrimaryInfo>,
-    at_unix: u64,
+pub(crate) struct LastSwitch {
+    pub group_id: Uuid,
+    pub group_name: String,
+    pub icon: String,
+    pub primary: Option<PrimaryInfo>,
+    pub at_unix: u64,
 }
 
 fn write_last_switch(ctx: &Ctx, group: &Group, primary: Option<PrimaryInfo>) {
     let record = LastSwitch {
         group_id: group.id,
-        group_name: &group.name,
-        icon: &group.icon,
+        group_name: group.name.clone(),
+        icon: group.icon.clone(),
         primary,
         at_unix: unix_now(),
     };
@@ -494,7 +503,7 @@ fn print_report(report: &ApplyReport, out: Output) {
     out.json(report);
 }
 
-fn hz(milli: u32) -> String {
+pub(crate) fn hz(milli: u32) -> String {
     if milli.is_multiple_of(1000) {
         (milli / 1000).to_string()
     } else {

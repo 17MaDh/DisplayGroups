@@ -11,9 +11,13 @@ pub mod agent;
 mod audio;
 mod display;
 mod ffi;
+mod ffi_ui;
+pub mod osd;
 pub mod shell;
+pub mod system;
 pub mod ui;
 mod util;
+pub mod window;
 
 pub use audio::WinAudio;
 pub use display::WinBackend;

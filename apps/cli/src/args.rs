@@ -56,4 +56,11 @@ pub enum Command {
     },
     /// Handle a displaygroups:// link (used by the protocol handler).
     Uri { url: String },
+    /// Run the background agent: hotkeys, on-screen display, disconnect fallback.
+    /// Normally started with Windows through displaygroupsw.exe.
+    Agent {
+        /// Show what a hotkey would do on the OSD, without switching displays.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }

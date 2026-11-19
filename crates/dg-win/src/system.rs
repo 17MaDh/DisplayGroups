@@ -1,0 +1,164 @@
+//! Small process-level helpers for the agent: single instance, config watching,
+//! theme, hotkey probing and memory use.
+
+use std::path::Path;
+use std::ptr::{null, null_mut};
+
+use crate::ffi::RegGetValueW;
+use crate::ffi_ui::*;
+use crate::util::wide;
+
+/// Held for the lifetime of the agent; a second agent sees the mutex and exits.
+pub struct SingleInstance(HANDLE);
+
+impl SingleInstance {
+    /// `None` when another process already holds `name`.
+    pub fn acquire(name: &str) -> Option<Self> {
+        let n = wide(name);
+        // SAFETY: named mutex creation; we only test for prior existence.
+        unsafe {
+            let h = CreateMutexW(null(), 0, n.as_ptr());
+            if h.is_null() {
+                return None;
+            }
+            if GetLastError() == ERROR_ALREADY_EXISTS {
+                CloseHandle(h);
+                return None;
+            }
+            Some(Self(h))
+        }
+    }
+}
+
+impl Drop for SingleInstance {
+    fn drop(&mut self) {
+        // SAFETY: our own handle.
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
+// SAFETY: a kernel handle may be closed from any thread.
+unsafe impl Send for SingleInstance {}
+
+/// Calls `on_change` (on a background thread) whenever a file in `dir` is written,
+/// created, renamed or deleted. The directory is created if needed.
+pub fn watch_dir(dir: &Path, on_change: impl Fn() + Send + 'static) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let d = wide(&dir.to_string_lossy());
+    // SAFETY: valid NUL-terminated path.
+    let handle = unsafe {
+        FindFirstChangeNotificationW(
+            d.as_ptr(),
+            0,
+            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE || handle.is_null() {
+        // SAFETY: trivial.
+        return Err(format!("cannot watch {} ({})", dir.display(), unsafe {
+            GetLastError()
+        }));
+    }
+    let raw = handle as usize;
+    std::thread::Builder::new()
+        .name("config-watch".into())
+        .spawn(move || {
+            let h = raw as HANDLE;
+            // SAFETY: the handle stays open for the life of the process.
+            unsafe {
+                while WaitForSingleObject(h, INFINITE) == WAIT_OBJECT_0 {
+                    on_change();
+                    if FindNextChangeNotification(h) == 0 {
+                        break;
+                    }
+                }
+            }
+        })
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
+/// True when Windows apps are set to dark mode.
+pub fn system_prefers_dark() -> bool {
+    let key = wide(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+    let value = wide("AppsUseLightTheme");
+    let mut data: u32 = 1;
+    let mut size: u32 = 4;
+    // SAFETY: reads a DWORD into a 4-byte buffer.
+    let r = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_DWORD,
+            null_mut(),
+            (&mut data as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    r == 0 && data == 0
+}
+
+/// True when no other process holds the global hotkey. (Our own registrations also
+/// count as taken.)
+pub fn hotkey_is_free(modifiers: u32, vk: u32) -> bool {
+    const PROBE_ID: i32 = 0xBFFE;
+    // SAFETY: registers and immediately releases a thread hotkey.
+    unsafe {
+        if RegisterHotKey(null_mut(), PROBE_ID, modifiers | MOD_NOREPEAT, vk) != 0 {
+            UnregisterHotKey(null_mut(), PROBE_ID);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Returns idle pages to Windows. Called when the agent goes idle (after start-up and
+/// after each switch); pages it needs again are faulted back in on demand.
+pub fn trim_working_set() {
+    // SAFETY: affects only the current process.
+    unsafe { K32EmptyWorkingSet(GetCurrentProcess()) };
+}
+
+/// Current working set of this process in bytes.
+pub fn working_set_bytes() -> Option<usize> {
+    let mut c = PROCESS_MEMORY_COUNTERS {
+        cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: fills a correctly sized struct for the current process.
+    let ok = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) };
+    (ok != 0).then_some(c.WorkingSetSize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_instance_is_exclusive() {
+        let name = format!("Local\\DisplayGroups.Test.{}", std::process::id());
+        let first = SingleInstance::acquire(&name).unwrap();
+        assert!(SingleInstance::acquire(&name).is_none());
+        drop(first);
+        assert!(SingleInstance::acquire(&name).is_some());
+    }
+
+    #[test]
+    fn probe_sees_a_held_hotkey() {
+        // Ctrl+Alt+Shift+F20: practically never used.
+        let (mods, vk) = (0x1 | 0x2 | 0x4, 0x83);
+        assert!(hotkey_is_free(mods, vk));
+        // SAFETY: test-only registration on this thread.
+        unsafe { RegisterHotKey(null_mut(), 7, mods, vk) };
+        assert!(!hotkey_is_free(mods, vk));
+        // SAFETY: as above.
+        unsafe { UnregisterHotKey(null_mut(), 7) };
+    }
+
+    #[test]
+    fn working_set_is_reported() {
+        assert!(working_set_bytes().unwrap() > 0);
+    }
+}

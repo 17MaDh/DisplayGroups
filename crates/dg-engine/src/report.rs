@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::ccd::Topology;
@@ -27,7 +27,7 @@ impl Attempt {
 }
 
 /// What the new primary display shows, for the CLI output and the OSD.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrimaryInfo {
     pub width: u32,

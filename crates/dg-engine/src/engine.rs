@@ -55,6 +55,8 @@ pub struct ApplyOptions<'a> {
     /// 0 skips the confirmation (and therefore the auto-revert).
     pub confirm_seconds: u32,
     pub confirmer: Option<&'a dyn Confirmer>,
+    /// Called once the new layout is on screen, before the confirmation (OSD hook).
+    pub on_applied: Option<&'a dyn Fn(Option<PrimaryInfo>)>,
 }
 
 /// A layout captured from the screen, ready to be stored as a group.
@@ -163,6 +165,9 @@ impl<'a> Engine<'a> {
             }
         }
         let primary = primary_info(&final_state);
+        if let Some(callback) = opts.on_applied {
+            callback(primary);
+        }
 
         let mut kept = true;
         if let (true, Some(confirmer)) = (opts.confirm_seconds > 0, opts.confirmer) {

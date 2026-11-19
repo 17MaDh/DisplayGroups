@@ -3,9 +3,12 @@ resolver = "2"
 members = [
     "crates/dg-model",
     "crates/dg-identity",
+    "crates/dg-hotkey",
+    "crates/dg-ipc",
     "crates/dg-engine",
     "crates/dg-win",
     "apps/cli",
+    "tools/lockscreen-spike",
 ]
 
 [workspace.package]
@@ -17,6 +20,8 @@ authors = ["DisplayGroups contributors"]
 [workspace.dependencies]
 dg-model = { path = "crates/dg-model" }
 dg-identity = { path = "crates/dg-identity" }
+dg-hotkey = { path = "crates/dg-hotkey" }
+dg-ipc = { path = "crates/dg-ipc" }
 dg-engine = { path = "crates/dg-engine" }
 dg-win = { path = "crates/dg-win" }
 

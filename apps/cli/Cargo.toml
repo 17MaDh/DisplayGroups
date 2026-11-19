@@ -20,6 +20,8 @@ path = "src/bin/displaygroupsw.rs"
 
 [dependencies]
 dg-model.workspace = true
+dg-hotkey.workspace = true
+dg-ipc.workspace = true
 dg-engine.workspace = true
 dg-win.workspace = true
 clap.workspace = true

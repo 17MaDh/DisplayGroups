@@ -5,9 +5,14 @@ Switch Windows between **groups of displays** with one click, shortcut or hotkey
 exactly which displays are on, the primary, resolution, refresh rate, position, rotation and
 scale, and optionally the audio output and volume.
 
-> **Status: pre-alpha.** Phase 2 of 5 is done: the switching engine and the command line.
-> The tray agent with hotkeys and OSD, lock-screen support, the settings app and the installer
-> come next. See [ARCHITECTURE.md](ARCHITECTURE.md).
+> **Status: pre-alpha.**
+> - **Done:** the switching engine and command line (Phase 2), and the background agent with
+>   hotkeys and an on-screen display (Phase 3).
+> - **Waiting on a feasibility test:** lock-screen support (see
+>   [docs/lockscreen-spike.md](docs/lockscreen-spike.md)).
+> - **Next:** the tray, the settings app and the installer.
+>
+> See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Command line
 
@@ -20,6 +25,17 @@ scale, and optionally the audio output and volume.
 | `displaygroups list` / `status` | Shows groups and monitors / what is on screen |
 | `displaygroups duplicate "Desktop"` | Copies a group |
 | `displaygroups recover [--extend]` | Restores the last layout that worked (or extends all displays) |
+| `displaygroupsw agent [--dry-run]` | Runs in the background: registers the hotkeys in `config.json`, shows the on-screen display after a switch, and reloads the config when it changes. `--dry-run` only shows what a hotkey would do |
+
+Hotkeys are entries in `config.json`. Example:
+
+```json
+"hotkeys": [
+  { "chord": "Ctrl+Alt+F12", "action": { "type": "toggle", "groups": ["<desktop id>", "<couch id>"] } }
+]
+```
+
+If another program already holds a chord, the agent says which one, when it can tell.
 
 - `--no-confirm` (alias `--force`) skips the countdown. `--json` prints machine-readable output.
 - `--config <path>` uses another config file.
