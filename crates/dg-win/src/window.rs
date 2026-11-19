@@ -59,8 +59,15 @@ pub struct AgentWindow {
 }
 
 impl AgentWindow {
+    /// The agent's window; [`crate::agent::is_running`] looks for its class.
     pub fn create() -> Result<Self, String> {
-        let class = wide(AGENT_WINDOW_CLASS);
+        Self::create_with(AGENT_WINDOW_CLASS, "DisplayGroups Agent")
+    }
+
+    /// A window of another class that receives the same events, for processes that are
+    /// not the agent (the settings app follows display changes with it).
+    pub fn create_with(class_name: &str, title: &str) -> Result<Self, String> {
+        let class = wide(class_name);
         // SAFETY: standard window-class registration and creation with valid pointers.
         unsafe {
             let instance = GetModuleHandleW(null());
@@ -81,7 +88,7 @@ impl AgentWindow {
             RegisterClassExW(&wc);
             // A hidden *top-level* window: message-only windows miss broadcasts such as
             // WM_DISPLAYCHANGE.
-            let title = wide("DisplayGroups Agent");
+            let title = wide(title);
             let hwnd = CreateWindowExW(
                 WS_EX_TOOLWINDOW,
                 class.as_ptr(),

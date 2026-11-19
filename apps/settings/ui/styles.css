@@ -532,6 +532,32 @@ button.btn.icon-only[aria-pressed="true"] {
   color: var(--danger);
 }
 
+/* "On screen now": what Windows shows, kept current as displays change. */
+.screen-now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-block-end: 12px;
+  padding: 8px 12px;
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-lg);
+  font-size: 13px;
+}
+
+.screen-now .label {
+  color: var(--text-2);
+}
+
+.screen-now .chip {
+  display: inline-flex;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: var(--subtle);
+}
+
 .canvas {
   position: relative;
   block-size: 300px;
@@ -540,6 +566,23 @@ button.btn.icon-only[aria-pressed="true"] {
   border: 1px solid var(--stroke);
   overflow: hidden;
   touch-action: none;
+}
+
+.mode-size {
+  flex-wrap: nowrap;
+}
+
+.mode-size input {
+  inline-size: 6em;
+  min-inline-size: 0;
+}
+
+.canvas.empty-group {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--text-2);
+  text-align: center;
 }
 
 .canvas svg {

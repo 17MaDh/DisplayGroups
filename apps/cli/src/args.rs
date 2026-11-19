@@ -92,8 +92,9 @@ pub enum Command {
         #[arg(value_enum)]
         state: Toggle,
     },
-    /// Run the background agent: hotkeys, on-screen display, disconnect fallback.
-    /// Normally started with Windows through displaygroupsw.exe.
+    /// Run the background agent: hotkeys, tray icon, on-screen display, automatic
+    /// switching, disconnect fallback. Normally started with Windows through
+    /// displaygroupsw.exe.
     Agent {
         /// Show what a hotkey would do on the OSD, without switching displays.
         #[arg(long)]

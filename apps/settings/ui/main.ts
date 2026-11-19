@@ -1,16 +1,17 @@
 // Shell: title bar, navigation, theme, toasts, and a flash-free start.
 
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, type Theme } from "./api";
+import { api, type Config, type Group, type Theme } from "./api";
 import { h, icon } from "./dom";
 import { setLanguage, t } from "./i18n";
 import { renderDiagnostics } from "./pages/diagnostics";
-import { renderGroups } from "./pages/groups";
+import { forgetModes, renderGroups } from "./pages/groups";
 import { renderHotkeys } from "./pages/hotkeys";
 import { renderSettings } from "./pages/settings";
 import { renderShortcuts } from "./pages/shortcuts";
 import { renderTriggers } from "./pages/triggers";
-import { changed, dirty, discard, reload, save, state, subscribe, type Page } from "./state";
+import { changed, dirty, discard, refreshStatus, reload, save, state, subscribe, type Page } from "./state";
 
 const NAV: [Page, string, string][] = [
   ["groups", "", "nav.groups"],
@@ -68,7 +69,7 @@ export function toast(message: string, kind: "info" | "error" = "info", action?:
       : null,
   );
   document.body.append(el);
-  toastTimer = window.setTimeout(() => el.remove(), kind === "error" ? 9000 : 5000);
+  toastTimer = window.setTimeout(() => el.remove(), kind === "error" || action ? 9000 : 5000);
 }
 
 export function themeSwitch(): HTMLElement {
@@ -98,13 +99,88 @@ export function themeSwitch(): HTMLElement {
   );
 }
 
-export async function saveNow(): Promise<void> {
-  const ok = await save();
-  if (ok) {
-    toast(t("common.saved"));
-  } else {
-    toast(t("common.notSaved"), "error");
+/** Switches to `g` for real and says how it ended (the countdown dialog decides). */
+export async function applyAndReport(g: Group): Promise<void> {
+  toast(t("groups.testing", { name: g.name }));
+  let code: number;
+  try {
+    code = await api.applyGroup(g.id);
+  } catch (e) {
+    toast(String(e), "error");
+    return;
   }
+  if (await refreshStatus()) changed();
+  if (code === 0) toast(t("groups.applied", { name: g.name }));
+  else if (code === 3) toast(t("groups.reverted", { name: g.name }));
+  else toast(t("groups.applyFailed", { name: g.name }), "error");
+}
+
+/**
+ * Saving never changes the screen. When the group on screen now was edited, offer to
+ * apply it so Windows follows.
+ */
+export async function saveNow(): Promise<void> {
+  const before = JSON.parse(state.saved) as Config;
+  const ok = await save();
+  if (!ok) {
+    toast(t("common.notSaved"), "error");
+    return;
+  }
+  const onScreen = state.config.groups.find((g) => g.id === state.currentGroup);
+  const old = before.groups.find((g) => g.id === onScreen?.id);
+  if (onScreen && old && JSON.stringify(old.displays) !== JSON.stringify(onScreen.displays)) {
+    toast(t("groups.savedOnScreen", { name: onScreen.name }), "info", { label: t("groups.applyNow"), run: () => void applyAndReport(onScreen) });
+  } else {
+    toast(t("common.saved"));
+  }
+}
+
+/** JSON with sorted keys and without empty values, to compare configs by content. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(
+          Object.entries(v as Record<string, unknown>)
+            .filter(([, x]) => x !== null && x !== undefined)
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+        )
+      : v,
+  );
+}
+
+/** Windows' displays changed: show the new state (re-rendered only if it differs). */
+async function displaysChanged(): Promise<void> {
+  if (await refreshStatus()) {
+    forgetModes();
+    changed();
+  }
+}
+
+/**
+ * The config file changed on disk (a capture, a change from the tray or another
+ * window). Unsaved edits here are never replaced without asking.
+ */
+async function configChangedOnDisk(): Promise<void> {
+  const disk = await api.loadConfig();
+  if (canonical(disk.config) === canonical(JSON.parse(state.saved))) return;
+  if (dirty()) {
+    toast(t("common.changedOnDisk"), "info", { label: t("common.loadChanges"), run: () => void reload().then(changed) });
+    return;
+  }
+  await reload();
+  changed();
+}
+
+let configTimer = 0;
+
+async function followChanges(): Promise<void> {
+  await listen("displays-changed", () => void displaysChanged());
+  await listen("config-changed", () => {
+    window.clearTimeout(configTimer);
+    configTimer = window.setTimeout(() => void configChangedOnDisk(), 300);
+  });
+  // Changes made while the window was in the background are shown on return.
+  window.addEventListener("focus", () => void displaysChanged());
 }
 
 function titlebar(): HTMLElement {
@@ -189,6 +265,7 @@ async function main(): Promise<void> {
   await setLanguage(appliedLanguage, state.platform.systemLanguage);
   subscribe(render);
   render();
+  await followChanges();
 
   const win = getCurrentWindow();
   await win.onCloseRequested((event) => {

@@ -1,0 +1,23 @@
+[package]
+name = "dg-gnome"
+description = "DisplayGroups display backend for GNOME on Linux (Mutter's DisplayConfig D-Bus API)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+dg-model.workspace = true
+dg-identity.workspace = true
+dg-engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+
+[lints]
+workspace = true

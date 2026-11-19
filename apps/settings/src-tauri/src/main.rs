@@ -19,9 +19,10 @@ use dg_identity::match_monitor;
 use dg_model::paths::AppPaths;
 use dg_model::validate::{self, Issue};
 use dg_model::{store, Config};
+use dg_win::window::{AgentEvent, AgentWindow};
 use dg_win::WinBackend;
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use uuid::Uuid;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -345,8 +346,8 @@ async fn monitor_modes(config: Config, monitor: String) -> Result<Vec<ModeOption
             .iter()
             .map(dg_engine::observe::observe)
             .collect();
-        let m = match_monitor(&entry.identity, &observed)
-            .map_err(|_| "turn this display on to list its modes".to_string())?;
+        // "off" is translated by the page.
+        let m = match_monitor(&entry.identity, &observed).map_err(|_| "off".to_string())?;
         let target = active.targets[m.index].target;
         let mut modes: Vec<ModeOption> = backend
             .list_modes(target)
@@ -430,15 +431,60 @@ fn toggle(on: bool) -> String {
     if on { "on" } else { "off" }.to_string()
 }
 
-/// "Test": runs the real switch with its countdown through `displaygroupsw.exe`.
+/// "Test" / "Apply now": runs the real switch with its countdown through
+/// `displaygroupsw.exe` (which shows its own error dialogs) and returns its exit code
+/// once the switch is kept or reverted, so the page can say what happened.
 #[tauri::command]
-fn apply_group(app: State<App>, id: Uuid) -> Result<(), String> {
+async fn apply_group(app: State<'_, App>, id: Uuid) -> Result<i32, String> {
     let exe = app.exe_dir.join("displaygroupsw.exe");
-    Command::new(&exe)
-        .args(["apply", &id.to_string()])
-        .spawn()
-        .map(drop)
-        .map_err(|e| format!("{}: {e}", exe.display()))
+    tauri::async_runtime::spawn_blocking(move || {
+        Command::new(&exe)
+            .args(["apply", &id.to_string()])
+            .status()
+            .map(|s| s.code().unwrap_or(-1))
+            .map_err(|e| format!("{}: {e}", exe.display()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Window class of the settings app's hidden event window (not the agent's class, so
+/// `dg_win::agent::is_running` is not fooled).
+const WATCH_WINDOW_CLASS: &str = "DisplayGroups.Settings.Watch";
+const TIMER_DISPLAYS: usize = 1;
+
+/// Tells the page when Windows' displays change (a display turned on or off,
+/// connected, removed, rearranged or set to another mode) and when the config file
+/// changes on disk, so the window shows what Windows has now.
+fn watch_changes(app: tauri::AppHandle, config_dir: Option<PathBuf>) {
+    if let Some(dir) = config_dir {
+        let handle = app.clone();
+        let _ = dg_win::system::watch_dir(&dir, move || {
+            let _ = handle.emit("config-changed", ());
+        });
+    }
+    let _ = std::thread::Builder::new()
+        .name("display-watch".into())
+        .spawn(move || {
+            let Ok(window) = AgentWindow::create_with(WATCH_WINDOW_CLASS, "DisplayGroups Settings")
+            else {
+                return;
+            };
+            window.run(|event| {
+                match event {
+                    // Windows sends several messages per change; report once it settles.
+                    AgentEvent::DisplayChanged | AgentEvent::DeviceChanged => {
+                        window.set_timer(TIMER_DISPLAYS, 700)
+                    }
+                    AgentEvent::Timer(TIMER_DISPLAYS) => {
+                        window.kill_timer(TIMER_DISPLAYS);
+                        let _ = app.emit("displays-changed", ());
+                    }
+                    _ => {}
+                }
+                true
+            });
+        });
 }
 
 /// Programs with a window open right now, to pick one for a trigger (lower-case
@@ -559,6 +605,13 @@ fn main() {
                     let _ = window.set_effects(effects);
                 }
             }
+            let config_dir = app
+                .state::<App>()
+                .paths
+                .config_file
+                .parent()
+                .map(PathBuf::from);
+            watch_changes(app.handle().clone(), config_dir);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

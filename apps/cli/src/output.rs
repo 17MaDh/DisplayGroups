@@ -1,14 +1,19 @@
 //! Where messages go: the terminal for `displaygroups.exe`, message boxes (errors only)
 //! for `displaygroupsw.exe`.
 
+#[cfg(windows)]
 use std::io::IsTerminal;
+#[cfg(windows)]
 use std::sync::mpsc;
+#[cfg(windows)]
 use std::time::Duration;
 
+#[cfg(windows)]
 use dg_engine::Confirmer;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub struct Output {
     pub console: bool,
     pub json: bool,
@@ -46,12 +51,13 @@ impl Output {
         if self.console {
             eprintln!("error: {}", text.as_ref());
         } else {
-            dg_win::ui::show_error("DisplayGroups", text.as_ref());
+            crate::sys::show_error("DisplayGroups", text.as_ref());
         }
     }
 
     /// Terminal prompt when a person is at the console; the countdown dialog otherwise
-    /// (shortcuts, hotkeys, scripts with redirected input).
+    /// (shortcuts, hotkeys, scripts with redirected input). On GNOME, GNOME Shell asks.
+    #[cfg(windows)]
     pub fn confirmer(&self) -> Box<dyn Confirmer> {
         if self.console && std::io::stdin().is_terminal() {
             Box::new(ConsoleConfirmer)
@@ -69,8 +75,10 @@ impl Output {
     }
 }
 
+#[cfg(windows)]
 pub struct ConsoleConfirmer;
 
+#[cfg(windows)]
 impl Confirmer for ConsoleConfirmer {
     fn confirm(&self, seconds: u32, group_name: &str) -> bool {
         eprintln!(

@@ -6,6 +6,9 @@
 //! follows the Windows display language. The agent calls [`init`] again when the
 //! setting changes.
 
+// On Linux the strings are only used by parts that come in later phases (§16).
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -28,7 +31,7 @@ static STRINGS: RwLock<Option<Strings>> = RwLock::new(None);
 pub fn resolve(setting: &str) -> String {
     let s = setting.trim().to_ascii_lowercase();
     if s.is_empty() || s == "system" {
-        dg_win::system::ui_language()
+        crate::sys::ui_language()
     } else {
         s
     }

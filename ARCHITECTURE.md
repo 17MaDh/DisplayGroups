@@ -143,6 +143,7 @@
 | D6 | v1.0 additions: theme switcher, flash-free launch, motion, i18n/RTL readiness, OSD, Duplicate Group, per-group volume, pre/post-switch actions, `displaygroups://` URI, disconnect auto-fallback | Approved (§9–§11) |
 | D7 | Deferred to v1.1: window-position restore, automatic triggers, DDC/CI brightness, auto-updater | Planned in §15 |
 | D8 | v1.1 choices (2026-11-19). **Order:** automatic switching first, then window positions, DDC/CI, and the update notice last. **Triggers:** a program starting (switch back when it ends) and a game controller connecting. **Windows:** saved automatically per group. **Updates:** notice only, off by default; never downloads or installs | Approved (§15); §15.1 done |
+| D9 | Linux (2026-11-19). **Scope:** a full port to Ubuntu GNOME (Wayland and X11) through Mutter's DisplayConfig D-Bus API, in phases L1–L4. **Build:** WSL Ubuntu 24.04 on the development PC. **Test:** an Ubuntu GNOME VM | Approved (§16); L1 done |
 
 ---
 
@@ -547,8 +548,38 @@ Tool: `tools/lockscreen-spike`; steps in `docs/lockscreen-spike.md`. The broker 
   - A monitor's number is its position among `config.monitors` ordered by key
     (`Config::monitor_number`), so it is the same in every group and in the canvas. Displays not
     in the config are numbered after them.
-  - "Capture current setup" saves the current layout and the timings that strategy S1 uses.
-  - "Test" applies the group with the countdown.
+  - "Capture current setup" saves the current layout and the timings that strategy S1 uses. It
+    suggests an unused name ("Desktop" first, then the displays that are on, e.g. "SAMSUNG")
+    and asks before replacing an existing group of the same name. Earlier builds suggested
+    "Desktop" every time, so one click on OK overwrote that group. When the screen matches
+    no group, the "On screen now" strip offers **Save as a new group**.
+  - "Test" applies the group with the countdown. It waits for `displaygroupsw.exe apply` to
+    finish and reports kept, reverted (exit 3) or failed.
+  - "Update from screen" re-captures the current layout into the selected group (same id, so
+    hotkeys, shortcuts and triggers still point at it).
+  - **Add a display** also offers monitors that are connected but in no group yet. `Engine::status`
+    returns the key and entry each would be saved under (`ConnectedMonitor::new_monitor`), and
+    picking one adds the entry to `config.monitors`.
+  - **New group** adds an empty group (saved with the other edits; validation requires at
+    least one enabled display). An added display starts from, in order:
+    1. the same monitor in another group, including its captured timings and scale;
+    2. its current mode if it is on;
+    3. its native mode from the EDID's first detailed timing (`dg_identity::edid::preferred_mode`,
+       `ConnectedMonitor::preferred`), since Windows lists modes only for active displays;
+    4. 1920×1080 at 60 Hz.
+
+    The first display goes to (0,0) and is the primary. For a display that is off, the mode
+    is typed in; the pickers appear once it is on.
+- **Following Windows:** the window always shows what Windows has now.
+  - A thread owns a hidden top-level window of class `DisplayGroups.Settings.Watch`. It is not
+    the agent's class, so `agent::is_running` is unaffected. It gets `WM_DISPLAYCHANGE` and
+    monitor arrival/removal, waits 700 ms for things to settle, then emits `displays-changed`.
+  - The page re-reads the status, and also does so when the window gets focus. It re-renders
+    only if the status changed, so clicks and typing are not disturbed.
+  - The config folder is watched (`config-changed`): the page reloads when the file changes
+    elsewhere, unless it has unsaved edits. In that case it offers to load the change instead.
+  - Saving never changes the screen. When the group on screen was edited, the "Saved" message
+    offers **Apply now**.
 - **Shortcut generator:**
   - Native `IShellLinkW` + `IPersistFile`. On the test machine `WScript.Shell` failed to save to a non-ASCII (Arabic) OneDrive Desktop path **[VERIFIED]**.
   - Targets `displaygroupsw.exe apply --id <uuid>`. Start Menu copies go in `Programs\DisplayGroups\`.
@@ -848,3 +879,137 @@ and timings; `-- --names` adds program names), for bug reports about controllers
 - **Notice:** if the release is newer, it shows a tray notification with a link to the release
   page.
 - **Never** downloads or installs anything (D8).
+
+---
+
+## 16. Linux (Ubuntu, GNOME)
+
+Decided with the user (D9): a full port, done in phases. It targets Ubuntu's default desktop,
+GNOME, on both Wayland and X11, and is tested in an Ubuntu GNOME VM. KDE Plasma (kscreen)
+and wlroots compositors are out of scope. Builds run in WSL Ubuntu 24.04 on the Windows
+development machine.
+
+### 16.1 Display backend: Mutter's DisplayConfig
+
+GNOME has no equivalent of `SetDisplayConfig` for applications. Its compositor, Mutter, owns
+the configuration and offers it on the session bus as `org.gnome.Mutter.DisplayConfig`. GNOME
+Settings, `gnome-monitor-config` and `gnome-randr` use the same interface.
+
+- **`GetCurrentState`** returns:
+  - monitors: connector, vendor, product, serial, and modes with id, size, refresh, preferred
+    scale, supported scales, current and preferred flags;
+  - logical monitors: x, y, scale, transform, primary, connectors;
+  - `layout-mode` and `global-scale-required`.
+- **`ApplyMonitorsConfig(serial, method, logical monitors, properties)`** replaces the whole
+  layout. Every monitor that is not listed is turned off, which is the "turn off the others"
+  policy for free. The methods are:
+  - 0 verify: `validate`, and the check before every switch; changes nothing.
+  - 1 temporary: `--no-confirm` or a countdown of 0. GNOME's remembered layout comes back at
+    the next sign-in or hot-plug.
+  - 2 persistent: the default. **GNOME Shell itself asks "Keep these display settings?"**
+    and reverts after 20 s, so DisplayGroups needs no countdown dialog on Linux.
+  - A stale serial is refused, so a plan is always made from a fresh state.
+- **Identity:** the EDID is read from `/sys/class/drm/card*-<connector>/edid`. The kernel's
+  `HDMI-A-1` is Mutter's `HDMI-1`. The same pnp id, product code and serial are produced as
+  on Windows, so a config captured on Windows recognises the monitors on Linux.
+  - Without an EDID, Mutter's spec is decoded: a product of `0x721b` is a product code, and
+    a serial of `0x16780800` is a numeric serial, written in decimal as Windows does.
+  - Each config entry is matched against all connected monitors, strongest tier first, so
+    identical twins get different keys (found with Mutter's virtual monitors).
+- **Layout conversion (`layout.rs`):** the config keeps Windows-style physical-pixel
+  rectangles. Mutter's logical layout (Wayland) sizes each monitor as mode ÷ scale, so 4K at
+  150% takes 2560×1440 there.
+  - Positions are rebuilt from how the displays touch. The primary stays at (0,0), and each
+    neighbour keeps its side and its offset along the shared edge, in the units of the
+    display it is attached to. Example: the 1080p display at (−1920, 474) beside a 4K
+    display at 150% becomes (−1920, 316).
+  - `capture` does the reverse.
+  - X11 (`layout-mode` physical) uses pixels as they are, with one scale for every display
+    (`global-scale-required`).
+- **Modes and scales:**
+  - The refresh rate follows the group's policy with ±0.5 Hz tolerance, so 120 Hz picks
+    Mutter's 119.880.
+  - A size the monitor does not offer falls back to its preferred mode, with a note.
+  - Scales snap to the mode's supported scales. Captured fractional scales are rounded to the
+    config's scale steps (100, 125, 150…).
+- **Not yet:**
+  - HDR is left as is.
+  - The rotation direction (transform 1 = portrait) is still to be checked on hardware.
+
+### 16.2 Code layout
+
+- **`crates/dg-gnome`:**
+  - `state.rs`: plain data.
+  - `ops.rs`: status, current group, capture.
+  - `plan.rs`: a group → `ApplyMonitorsConfig`, plus `extend_all`.
+  - `layout.rs`.
+  - `observe.rs`: identity.
+  - `dbus.rs` (Linux only): zbus, blocking.
+
+  Everything except `dbus.rs` is pure and tested on both systems.
+- **`apps/cli`:**
+  - `common.rs`: the shared code — find and validate groups, save a capture, print list and
+    status, duplicate, links, actions, the switch record.
+  - `commands.rs` (Windows) and `linux.rs` (Linux) do the display work; `sys.rs` holds the
+    few platform facts (language, theme, dialogs, spawning).
+  - `dg-win`, `dg-ipc` and `dg-hotkey` are Windows-only dependencies.
+- **Paths:**
+  - config: `$XDG_CONFIG_HOME/displaygroups`;
+  - logs and state: `$XDG_STATE_HOME/displaygroups`;
+  - `portable.flag` works the same as on Windows.
+- **Exit codes:** as on Windows. 4 means a monitor is missing; 6 means GNOME rejected the
+  layout.
+
+### 16.3 Phases
+
+| Phase | Content | Status |
+|---|---|---|
+| **L1** | GNOME backend; the CLI on Linux: `status`, `list`, `capture`, `validate`, `apply`, `toggle`, `duplicate`, `recover [--extend]`, `uri` | **Done** |
+| **L2** | Agent: see the list below | Planned |
+| **L3** | Settings app on Linux: see the list below | Planned |
+| **L4** | Packaging: see the list below | Planned |
+
+**L2, the agent:**
+- tray icon through StatusNotifierItem (Ubuntu ships the AppIndicator extension);
+- hotkeys as GNOME custom shortcuts that run `displaygroups apply …` (no global key grabs
+  exist for apps on Wayland);
+- on-screen display through desktop notifications;
+- `MonitorsChanged` for the disconnect fallback;
+- triggers from `/proc` and evdev game controllers (window-title filters are X11 only);
+- autostart `.desktop` file, the `x-scheme-handler/displaygroups` link handler, and
+  `.desktop` shortcuts;
+- `identify`.
+
+**L3, the settings app:**
+- Tauri on WebKitGTK;
+- the portal file dialog;
+- `MonitorsChanged` instead of the hidden window;
+- Windows-only options hidden.
+
+**L4, packaging:**
+- `.deb` and AppImage from the Tauri bundler (WSL, later a CI job);
+- a VM test checklist;
+- Linux sections in README and SECURITY.md.
+
+### 16.4 Verified so far
+
+- **Unit tests** (16 in `dg-gnome`) on states shaped like the real rig: a 4K 240 Hz monitor at
+  150% on DP-1, a 1080p monitor on DP-2 and a 4K 120 Hz TV on HDMI-1. They cover:
+  - EDID identity matching a Windows-captured config;
+  - the layout round trip;
+  - Desktop planned while only the TV is on, and the TV picking 119.88 Hz;
+  - a missing monitor, a mode that is not offered, X11's single scale, the "leave"
+    policy, and twins.
+- **Against a real Mutter 46** in WSL (`mutter --headless --virtual-monitor ×2` on a
+  private session bus):
+  - `status`, `capture`, `duplicate` and `list`;
+  - `validate` (verify);
+  - `apply` (one display turned off; `status` then reports that group);
+  - `toggle` back;
+  - `recover --extend`.
+- **Not verified yet:**
+  - real monitors and real EDIDs in sysfs;
+  - GNOME Shell's "Keep these display settings?" for persistent switches (the headless test
+    used temporary ones);
+  - X11 sessions;
+  - rotation.

@@ -1,12 +1,20 @@
 //! Shared implementation of `displaygroups.exe` and `displaygroupsw.exe`.
 
+#[cfg(windows)]
 mod agent;
 mod args;
+#[cfg(windows)]
 mod commands;
+#[cfg(not(windows))]
+#[path = "linux.rs"]
+mod commands;
+mod common;
 mod i18n;
+#[cfg(windows)]
 mod integrate;
 mod logging;
 mod output;
+mod sys;
 pub mod uri;
 
 use std::path::{Path, PathBuf};
@@ -29,10 +37,15 @@ pub enum CliError {
     Usage(String),
     #[error("{0}")]
     Config(String),
+    #[cfg(not(windows))]
+    #[error(transparent)]
+    Gnome(#[from] dg_gnome::GnomeError),
 }
 
 impl CliError {
     pub fn exit_code(&self) -> i32 {
+        #[cfg(not(windows))]
+        use dg_gnome::GnomeError;
         match self {
             CliError::Usage(_) => 2,
             CliError::Engine(
@@ -40,6 +53,12 @@ impl CliError {
             ) => 4,
             CliError::Engine(EngineError::Locked) => 5,
             CliError::Engine(EngineError::AllStrategiesFailed { .. }) => 6,
+            #[cfg(not(windows))]
+            CliError::Gnome(
+                GnomeError::MonitorMissing { .. } | GnomeError::AmbiguousMonitor { .. },
+            ) => 4,
+            #[cfg(not(windows))]
+            CliError::Gnome(GnomeError::Rejected(_)) => 6,
             _ => 1,
         }
     }
@@ -56,6 +75,7 @@ pub(crate) struct Ctx {
 }
 
 pub fn main_entry(console: bool) -> i32 {
+    #[cfg(windows)]
     dg_win::ui::set_dpi_aware();
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
@@ -63,10 +83,10 @@ pub fn main_entry(console: bool) -> i32 {
         Err(e) => {
             let text = e.to_string();
             if e.use_stderr() {
-                dg_win::ui::show_error("DisplayGroups", &text);
+                sys::show_error("DisplayGroups", &text);
                 return 2;
             }
-            dg_win::ui::show_info("DisplayGroups", &text);
+            sys::show_info("DisplayGroups", &text);
             return 0;
         }
     };
@@ -90,7 +110,7 @@ pub(crate) fn prefers_dark(theme: dg_model::Theme) -> bool {
     match theme {
         dg_model::Theme::Dark => true,
         dg_model::Theme::Light => false,
-        dg_model::Theme::System => dg_win::system::system_prefers_dark(),
+        dg_model::Theme::System => sys::prefers_dark(),
     }
 }
 
@@ -119,7 +139,12 @@ fn run(cli: Cli, out: Output) -> Result<i32, CliError> {
         rtl: i18n::is_rtl(),
         ..out
     };
-    tracing::info!(command = ?cli.command, config = %ctx.config_path.display(), "start");
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        command = ?cli.command,
+        config = %ctx.config_path.display(),
+        "start"
+    );
     if let Some(from) = loaded.migrated_from {
         out.warn(format!(
             "config upgraded from schema {from}; a backup was kept next to it"

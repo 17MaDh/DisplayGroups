@@ -51,7 +51,9 @@ export async function reload(): Promise<void> {
   await refreshStatus();
 }
 
-export async function refreshStatus(): Promise<void> {
+/** Reads what Windows has on screen now. Returns true when that differs from before. */
+export async function refreshStatus(): Promise<boolean> {
+  const before = JSON.stringify([state.status, state.currentGroup]);
   try {
     const [status, current] = await api.displayStatus(state.config);
     state.status = status;
@@ -59,6 +61,7 @@ export async function refreshStatus(): Promise<void> {
   } catch {
     state.status = null;
   }
+  return JSON.stringify([state.status, state.currentGroup]) !== before;
 }
 
 /** Saves the config; on validation errors nothing is written and the issues are kept. */

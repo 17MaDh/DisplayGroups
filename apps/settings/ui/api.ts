@@ -136,9 +136,19 @@ export interface ActiveDisplay {
   primary: boolean;
 }
 
+export interface ConnectedMonitor {
+  name: string;
+  monitorKey: string | null;
+  active: boolean;
+  /** A monitor not in the config yet: the key and entry it would be saved under. */
+  newMonitor?: { key: string; entry: MonitorEntry };
+  /** Native mode from the EDID (Windows lists modes only for displays that are on). */
+  preferred?: { width: number; height: number; refreshMilliHz: number };
+}
+
 export interface Status {
   displays: ActiveDisplay[];
-  connected: { name: string; monitorKey: string | null; active: boolean }[];
+  connected: ConnectedMonitor[];
 }
 
 export interface HotkeyProbe {
@@ -184,7 +194,8 @@ export const api = {
   displayStatus: (config: Config) => invoke<[Status, string | null]>("display_status", { config }),
   monitorModes: (config: Config, monitor: string) => invoke<ModeOption[]>("monitor_modes", { config, monitor }),
   cli: (command: CliCommand) => invoke<CliResult>("run_cli", { command }),
-  applyGroup: (id: string) => invoke<void>("apply_group", { id }),
+  /** Switches for real (with the countdown) and returns the CLI exit code once done. */
+  applyGroup: (id: string) => invoke<number>("apply_group", { id }),
   builtinIcons: () => invoke<Record<string, string>>("builtin_icons"),
   /** Windows "Open" dialog for a .ico/.png; returns the value for `group.icon`, or null. */
   pickIcon: (title: string, filter: string) => invoke<string | null>("pick_icon", { title, filter }),

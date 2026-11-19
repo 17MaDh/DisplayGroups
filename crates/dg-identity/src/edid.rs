@@ -79,6 +79,28 @@ pub fn parse_edid(bytes: &[u8]) -> Result<Edid, EdidError> {
     })
 }
 
+/// The monitor's preferred (native) mode from the first detailed timing descriptor:
+/// `(width, height, refresh in millihertz)`. Windows lists modes only for displays that
+/// are on, so this is the best default for one that is connected but off.
+pub fn preferred_mode(bytes: &[u8]) -> Option<(u32, u32, u32)> {
+    if bytes.len() < 128 || bytes[..8] != HEADER {
+        return None;
+    }
+    let d = &bytes[54..72];
+    // Pixel clock in units of 10 kHz; 0 means this slot is a display descriptor.
+    let clock = u64::from(u16::from_le_bytes([d[0], d[1]])) * 10_000;
+    let h_active = u32::from(d[2]) | (u32::from(d[4] & 0xF0) << 4);
+    let h_blank = u32::from(d[3]) | (u32::from(d[4] & 0x0F) << 8);
+    let v_active = u32::from(d[5]) | (u32::from(d[7] & 0xF0) << 4);
+    let v_blank = u32::from(d[6]) | (u32::from(d[7] & 0x0F) << 8);
+    let total = u64::from(h_active + h_blank) * u64::from(v_active + v_blank);
+    if clock == 0 || h_active == 0 || v_active == 0 || total == 0 {
+        return None;
+    }
+    let milli_hz = u32::try_from(clock * 1000 / total).ok()?;
+    Some((h_active, v_active, milli_hz))
+}
+
 /// Descriptor strings are up to 13 ASCII bytes, ended by 0x0A and padded with spaces.
 fn descriptor_text(raw: &[u8]) -> Option<String> {
     let text: String = raw
@@ -190,6 +212,24 @@ pub(crate) mod tests {
         let mut raw = make_edid("SAM", 1, 0, None, None);
         raw[127] ^= 0xFF;
         assert!(!parse_edid(&raw).unwrap().checksum_ok);
+    }
+
+    #[test]
+    fn preferred_mode_comes_from_the_first_timing() {
+        let mut raw = make_edid("SAM", 0x721B, 0, None, None);
+        assert_eq!(preferred_mode(&raw), None, "slot 0 is empty");
+        // The first detailed timing of the test rig's TV: 3840×2160 at 594 MHz.
+        raw[54..72].copy_from_slice(&[
+            8, 232, 0, 48, 242, 112, 90, 128, 176, 88, 138, 0, 80, 29, 116, 0, 0, 30,
+        ]);
+        assert_eq!(preferred_mode(&raw), Some((3840, 2160, 60_000)));
+        // CEA 1080p60: 148.5 MHz, 2200 × 1125 total.
+        raw[54..72].copy_from_slice(&[
+            0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 0x58, 0x2C, 0x45, 0x00, 0, 0, 0, 0, 0,
+            0x1E,
+        ]);
+        assert_eq!(preferred_mode(&raw), Some((1920, 1080, 60_000)));
+        assert_eq!(preferred_mode(&raw[..100]), None);
     }
 
     #[test]

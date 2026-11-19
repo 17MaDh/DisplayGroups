@@ -20,10 +20,7 @@ path = "src/bin/displaygroupsw.rs"
 
 [dependencies]
 dg-model.workspace = true
-dg-hotkey.workspace = true
-dg-ipc.workspace = true
 dg-engine.workspace = true
-dg-win.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -32,6 +29,14 @@ uuid.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+dg-hotkey.workspace = true
+dg-ipc.workspace = true
+dg-win.workspace = true
+
+[target.'cfg(not(windows))'.dependencies]
+dg-gnome.workspace = true
 
 [build-dependencies]
 embed-resource = "3"

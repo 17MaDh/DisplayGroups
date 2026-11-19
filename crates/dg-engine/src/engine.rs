@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 
+use dg_identity::edid::preferred_mode;
 use dg_identity::{match_monitor, monitor_key};
 use dg_model::{
     AudioSettings, Config, DisplaySetting, Group, Mode, MonitorEntry, OthersPolicy, Position,
@@ -94,6 +95,29 @@ pub struct ConnectedMonitor {
     pub name: String,
     pub monitor_key: Option<String>,
     pub active: bool,
+    /// For a monitor not in the config yet: the key and entry it would be saved under,
+    /// so it can be added to a group without capturing a layout first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_monitor: Option<NewMonitor>,
+    /// The native mode from the EDID, the default when the display is added to a group
+    /// while it is off (Windows lists modes only for displays that are on).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred: Option<PreferredMode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreferredMode {
+    pub width: u32,
+    pub height: u32,
+    pub refresh_milli_hz: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewMonitor {
+    pub key: String,
+    pub entry: MonitorEntry,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -293,23 +317,9 @@ impl<'a> Engine<'a> {
             let key = match known_monitor(cfg, details) {
                 Some(k) => k,
                 None => {
-                    let identity = identity_of(details);
-                    let base = monitor_key(
-                        &identity.pnp_id,
-                        &identity.product_code,
-                        identity.serial.as_deref(),
-                        identity.connector_hint.as_deref(),
-                    );
-                    let key = unique_key(&base, &used);
-                    new_monitors.push((
-                        key.clone(),
-                        MonitorEntry {
-                            display_name: display_name_of(details),
-                            identity,
-                            extra: Default::default(),
-                        },
-                    ));
-                    key
+                    let fresh = new_monitor(details, &used);
+                    new_monitors.push((fresh.key.clone(), fresh.entry));
+                    fresh.key
                 }
             };
             used.insert(key.clone());
@@ -414,14 +424,31 @@ impl<'a> Engine<'a> {
                 })
             })
             .collect();
+        let mut used: HashSet<String> = cfg.monitors.keys().cloned().collect();
         let connected = all
             .targets
             .iter()
             .filter(|d| d.available)
-            .map(|d| ConnectedMonitor {
-                name: display_name_of(d),
-                monitor_key: known_monitor(cfg, d),
-                active: on_screen.contains(&d.target),
+            .map(|d| {
+                let monitor_key = known_monitor(cfg, d);
+                let new_monitor = monitor_key.is_none().then(|| {
+                    let fresh = new_monitor(d, &used);
+                    used.insert(fresh.key.clone());
+                    fresh
+                });
+                ConnectedMonitor {
+                    name: display_name_of(d),
+                    monitor_key,
+                    active: on_screen.contains(&d.target),
+                    new_monitor,
+                    preferred: d.edid.as_deref().and_then(preferred_mode).map(
+                        |(width, height, refresh_milli_hz)| PreferredMode {
+                            width,
+                            height,
+                            refresh_milli_hz,
+                        },
+                    ),
+                }
             })
             .collect();
         Ok(Status {
@@ -806,6 +833,25 @@ fn known_monitor(cfg: &Config, details: &TargetDetails) -> Option<String> {
             matches!(match_monitor(&m.identity, std::slice::from_ref(&observed)), Ok(x) if x.tier.is_certain())
         })
         .map(|(k, _)| k.clone())
+}
+
+/// The config entry for a monitor seen for the first time, under a key not in `used`.
+fn new_monitor(details: &TargetDetails, used: &HashSet<String>) -> NewMonitor {
+    let identity = identity_of(details);
+    let base = monitor_key(
+        &identity.pnp_id,
+        &identity.product_code,
+        identity.serial.as_deref(),
+        identity.connector_hint.as_deref(),
+    );
+    NewMonitor {
+        key: unique_key(&base, used),
+        entry: MonitorEntry {
+            display_name: display_name_of(details),
+            identity,
+            extra: Default::default(),
+        },
+    }
 }
 
 fn unique_key(base: &str, used: &HashSet<String>) -> String {

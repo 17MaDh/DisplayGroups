@@ -7,6 +7,7 @@ members = [
     "crates/dg-ipc",
     "crates/dg-engine",
     "crates/dg-win",
+    "crates/dg-gnome",
     "apps/cli",
     "apps/settings/src-tauri",
     "tools/lockscreen-spike",
@@ -25,6 +26,7 @@ dg-hotkey = { path = "crates/dg-hotkey" }
 dg-ipc = { path = "crates/dg-ipc" }
 dg-engine = { path = "crates/dg-engine" }
 dg-win = { path = "crates/dg-win" }
+dg-gnome = { path = "crates/dg-gnome" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

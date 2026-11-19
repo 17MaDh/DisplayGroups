@@ -504,6 +504,40 @@ fn status_maps_screens_to_config_keys() {
         .connected
         .iter()
         .any(|c| c.monitor_key.as_deref() == Some(TV_KEY) && !c.active));
+    assert!(status.connected.iter().all(|c| c.new_monitor.is_none()));
+}
+
+#[test]
+fn status_offers_monitors_not_in_the_config() {
+    let fake = rig();
+    let mut cfg = rig_config();
+    // The TV was never captured, and its usual key belongs to a monitor that is not
+    // connected.
+    let mut absent = cfg.monitors[ASUS_KEY].clone();
+    absent.identity.pnp_id = "XXX".into();
+    cfg.monitors.insert(TV_KEY.into(), absent);
+    let status = Engine::new(&fake).status(&cfg).unwrap();
+    let fresh: Vec<_> = status
+        .connected
+        .iter()
+        .filter_map(|c| c.new_monitor.as_ref().map(|n| (c, n)))
+        .collect();
+    assert_eq!(fresh.len(), 1, "only the TV is unknown");
+    let (connected, new) = fresh[0];
+    assert!(connected.monitor_key.is_none() && !connected.active);
+    assert_eq!(new.entry.identity.pnp_id, "SAM");
+    assert_ne!(
+        new.key, TV_KEY,
+        "the key must not collide with an existing one"
+    );
+    assert!(new.key.starts_with(TV_KEY));
+    // Adding the offered entry makes the monitor known.
+    cfg.monitors.insert(new.key.clone(), new.entry.clone());
+    let status = Engine::new(&fake).status(&cfg).unwrap();
+    assert!(status
+        .connected
+        .iter()
+        .any(|c| c.monitor_key.as_deref() == Some(new.key.as_str())));
 }
 
 impl FakeBackend {

@@ -4,11 +4,16 @@ import { api, SCALE_STEPS, type Action, type DisplaySetting, type Group, type Mo
 import { field, h, icon, ltr, numberInput, select, toggle } from "../dom";
 import { t } from "../i18n";
 import { iconTile } from "../icons";
-import { saveNow, toast } from "../main";
+import { applyAndReport, saveNow, toast } from "../main";
 import { changed, dirty, monitorName, monitorNumber, reload, state } from "../state";
-import { layoutCanvas, makePrimary } from "./canvas";
+import { layoutCanvas, makePrimary, size } from "./canvas";
 
 const modeCache = new Map<string, ModeOption[] | string>();
+
+/** Windows' displays changed: modes are listed again (a display may be on now). */
+export function forgetModes(): void {
+  modeCache.clear();
+}
 
 function selected(): Group | undefined {
   return state.config.groups.find((g) => g.id === state.selectedGroup) ?? state.config.groups[0];
@@ -53,16 +58,120 @@ function requireSaved(): boolean {
   return true;
 }
 
+/**
+ * A name for capturing what is on screen now that is not taken: "Desktop" for the
+ * first group, otherwise the displays that are on (e.g. "SAMSUNG").
+ */
+function suggestedName(): string {
+  const shown = state.status?.displays ?? [];
+  const base =
+    state.config.groups.length === 0 || shown.length === 0
+      ? t("groups.captureDefault")
+      : shown.map((d) => (d.monitorKey ? monitorName(d.monitorKey) : d.name)).join(" + ");
+  return uniqueName(base);
+}
+
 async function capture(): Promise<void> {
   if (!requireSaved()) return;
-  const name = window.prompt(t("groups.captureName"), t("groups.captureDefault"));
-  if (!name?.trim()) return;
-  const result = await api.cli({ kind: "capture", name: name.trim() });
+  const name = window.prompt(t("groups.captureName"), suggestedName())?.trim();
+  if (!name) return;
+  // Capturing under an existing name replaces that group's layout: never by accident.
+  const existing = state.config.groups.find((g) => g.name.trim().toLowerCase() === name.toLowerCase());
+  if (existing && !window.confirm(t("groups.updateConfirm", { name: existing.name }))) return;
+  const result = await api.cli({ kind: "capture", name });
   toast(result.output || (result.ok ? t("common.done") : t("common.failed")), result.ok ? "info" : "error");
   await reload();
-  const created = state.config.groups.find((g) => g.name.trim().toLowerCase() === name.trim().toLowerCase());
+  const created = state.config.groups.find((g) => g.name.trim().toLowerCase() === name.toLowerCase());
   if (created) state.selectedGroup = created.id;
   changed();
+}
+
+/**
+ * "New group": an empty group to build by hand, for a layout that is not on screen
+ * (e.g. the TV while you sit at the desk). It is saved with the other changes.
+ */
+function newGroup(): void {
+  const g: Group = {
+    id: crypto.randomUUID(),
+    name: uniqueName(t("groups.newName")),
+    icon: "builtin:monitor",
+    othersPolicy: "disable",
+    displays: [],
+    audio: { enabled: false, endpoint: null, volumePercent: null },
+    actions: { enabled: false, allowFromUri: false, before: [], after: [] },
+    safety: { confirmSeconds: 15 },
+  };
+  state.config.groups.push(g);
+  state.selectedGroup = g.id;
+  state.selectedDisplay = 0;
+  changed();
+  // Ready to type the name.
+  requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".group-name")?.select());
+}
+
+/**
+ * A display added to a group starts from the best settings known for that monitor:
+ * the same monitor in another group (with its captured timings and scale), else what
+ * it shows now, else its native mode from the EDID. The first display is the primary.
+ */
+function newDisplay(g: Group, key: string): DisplaySetting {
+  const right = g.displays.length ? Math.max(...g.displays.map((d) => d.position.x + size(d).w)) : 0;
+  const elsewhere = state.config.groups.flatMap((o) => o.displays).find((d) => d.monitor === key);
+  if (elsewhere) {
+    return { ...structuredClone(elsewhere), enabled: true, position: { x: right, y: 0 } };
+  }
+  const active = state.status?.displays.find((d) => d.monitorKey === key);
+  const connected = state.status?.connected.find((c) => c.monitorKey === key || c.newMonitor?.key === key);
+  const mode = active
+    ? { width: active.width, height: active.height, refreshMilliHz: active.refreshMilliHz ?? 60000 }
+    : (connected?.preferred ?? { width: 1920, height: 1080, refreshMilliHz: 60000 });
+  return {
+    monitor: key,
+    enabled: true,
+    mode: { ...mode, refreshPolicy: "bestAtOrBelow" },
+    position: { x: right, y: 0 },
+    rotation: "landscape",
+    scalePercent: null,
+    hdr: null,
+    captured: null,
+  };
+}
+
+/** Replaces the group's displays with what Windows shows now (same group, same id). */
+async function updateFromScreen(g: Group): Promise<void> {
+  if (!requireSaved()) return;
+  if (!window.confirm(t("groups.updateConfirm", { name: g.name }))) return;
+  const result = await api.cli({ kind: "capture", name: g.name });
+  toast(result.ok ? t("groups.updated", { name: g.name }) : result.output || t("common.failed"), result.ok ? "info" : "error");
+  await reload();
+  changed();
+}
+
+/** What Windows shows right now; kept current as displays change. */
+function screenNow(): HTMLElement | null {
+  const status = state.status;
+  if (!status) return null;
+  const current = state.config.groups.find((g) => g.id === state.currentGroup);
+  const off = status.connected.filter((c) => !c.active);
+  return h(
+    "div",
+    { class: "screen-now", role: "status" },
+    h("span", { class: "label" }, t("groups.screenNow")),
+    ...status.displays.map((d) =>
+      h(
+        "span",
+        { class: "chip" },
+        h("b", {}, d.monitorKey ? monitorName(d.monitorKey) : d.name),
+        ltr(`${d.width}×${d.height}${d.refreshMilliHz ? ` · ${Math.round(d.refreshMilliHz / 1000)} Hz` : ""}`),
+      ),
+    ),
+    off.length
+      ? h("span", { class: "muted" }, t("groups.screenOff", { names: off.map((c) => (c.monitorKey ? monitorName(c.monitorKey) : c.name)).join(t("common.listSeparator")) }))
+      : null,
+    h("span", { class: "spacer" }),
+    current ? h("span", { class: "badge ok" }, t("groups.screenIsGroup", { name: current.name })) : h("span", { class: "badge" }, t("groups.screenNoGroup")),
+    current ? null : h("button", { class: "btn accent", onclick: () => void capture() }, icon(""), t("groups.saveScreen")),
+  );
 }
 
 function uniqueName(base: string): string {
@@ -183,13 +292,13 @@ function modeControls(d: DisplaySetting): HTMLElement[] {
       ),
     ];
   }
-  const hint = typeof modes === "string" && modes !== "loading" ? modes : undefined;
+  const hint = typeof modes === "string" && modes !== "loading" ? (modes === "off" ? t("editor.modesWhenOn") : modes) : undefined;
   return [
     field(
       t("editor.resolution"),
       h(
         "span",
-        { class: "row" },
+        { class: "row mode-size" },
         numberInput(d.mode.width, (v) => ((d.mode.width = v), changed()), { min: 640 }),
         "×",
         numberInput(d.mode.height, (v) => ((d.mode.height = v), changed()), { min: 480 }),
@@ -390,6 +499,9 @@ function moreOptions(g: Group): HTMLElement {
 function editor(g: Group): HTMLElement {
   const index = Math.min(state.selectedDisplay, g.displays.length - 1);
   const missing = Object.keys(state.config.monitors).filter((k) => !g.displays.some((d) => d.monitor === k));
+  // Connected monitors that are in no group yet (e.g. a TV that was off when the
+  // layouts were captured): adding one also saves its identity in the config.
+  const fresh = (state.status?.connected ?? []).flatMap((c) => (c.newMonitor && !state.config.monitors[c.newMonitor.key] ? [c.newMonitor] : []));
   const groupIndex = state.config.groups.indexOf(g);
   const issues = state.issues.filter((i) => i.path === `groups[${groupIndex}]` || i.path.startsWith(`groups[${groupIndex}].`) || i.path.startsWith(`groups[${groupIndex}][`));
 
@@ -401,6 +513,7 @@ function editor(g: Group): HTMLElement {
       { class: "row" },
       h("input", {
         type: "text",
+        class: "group-name",
         value: g.name,
         "aria-label": t("groups.rename"),
         style: "font-size:20px;font-weight:600;min-inline-size:260px",
@@ -430,13 +543,13 @@ function editor(g: Group): HTMLElement {
           class: "btn accent",
           onclick: async () => {
             if (!requireSaved()) return;
-            await api.applyGroup(g.id);
-            toast(t("groups.testing", { name: g.name }));
+            await applyAndReport(g);
           },
         },
         icon("\uE768"),
         t("groups.test"),
       ),
+      h("button", { class: "btn", title: t("groups.updateFromScreenHint"), onclick: () => void updateFromScreen(g) }, icon("\uE72C"), t("groups.updateFromScreen")),
       h(
         "button",
         {
@@ -458,18 +571,20 @@ function editor(g: Group): HTMLElement {
       h("button", { class: "btn danger", onclick: () => remove(g) }, t("groups.delete")),
     ),
     h("div", { style: "margin-block-start:12px" }),
-    layoutCanvas(
-      g,
-      index,
-      (i) => {
-        state.selectedDisplay = i;
-        changed();
-      },
-      (ok) => {
-        if (!ok) toast(t("editor.overlap"), "error");
-        changed();
-      },
-    ),
+    g.displays.length
+      ? layoutCanvas(
+          g,
+          index,
+          (i) => {
+            state.selectedDisplay = i;
+            changed();
+          },
+          (ok) => {
+            if (!ok) toast(t("editor.overlap"), "error");
+            changed();
+          },
+        )
+      : h("div", { class: "canvas empty-group" }, h("p", {}, t("editor.noDisplays"))),
     h(
       "div",
       { class: "display-tabs" },
@@ -489,30 +604,31 @@ function editor(g: Group): HTMLElement {
         ),
       ),
       h("button", { class: "btn", title: t("editor.identifyHint"), onclick: () => void identify() }, icon(""), t("editor.identify")),
-      missing.length
+      missing.length || fresh.length
         ? select(
-            [["", t("editor.addDisplay")], ...missing.map((k) => [k, monitorName(k)] as [string, string])],
+            [
+              ["", t("editor.addDisplay")],
+              ...missing.map((k) => [k, monitorName(k)] as [string, string]),
+              ...fresh.map((n) => [`new:${n.key}`, t("editor.newMonitor", { name: n.entry.displayName })] as [string, string]),
+            ],
             "",
-            (key) => {
-              if (!key) return;
-              const right = Math.max(...g.displays.map((d) => d.position.x + d.mode.width));
-              g.displays.push({
-                monitor: key,
-                enabled: true,
-                mode: { width: 1920, height: 1080, refreshMilliHz: 60000, refreshPolicy: "bestAtOrBelow" },
-                position: { x: right, y: 0 },
-                rotation: "landscape",
-                scalePercent: null,
-                hdr: null,
-                captured: null,
-              });
+            (choice) => {
+              if (!choice) return;
+              let key = choice;
+              if (choice.startsWith("new:")) {
+                const n = fresh.find((x) => `new:${x.key}` === choice);
+                if (!n) return;
+                state.config.monitors[n.key] = n.entry;
+                key = n.key;
+              }
+              g.displays.push(newDisplay(g, key));
               state.selectedDisplay = g.displays.length - 1;
               changed();
             },
           )
         : null,
     ),
-    inspector(g, index),
+    g.displays.length ? inspector(g, index) : null,
     issues.length ? h("div", { class: "issues" }, ...issues.map((i) => h("div", { class: `issue ${i.severity}` }, h("strong", {}, i.severity === "error" ? "!" : "i"), i.message))) : null,
     moreOptions(g),
   );
@@ -526,10 +642,11 @@ export function renderGroups(): HTMLElement {
     h("h2", {}, t("nav.groups")),
     h("span", { class: "spacer" }),
     dirty() ? h("button", { class: "btn accent", onclick: () => void saveNow() }, t("common.save")) : null,
+    h("button", { class: "btn", onclick: () => newGroup() }, icon("\uE710"), t("groups.new")),
     h("button", { class: "btn", onclick: () => void capture() }, icon("\uE722"), t("groups.capture")),
   );
   if (!g) {
-    return h("div", { class: "page" }, header, h("p", { class: "muted" }, t("groups.empty")));
+    return h("div", { class: "page" }, header, screenNow(), h("p", { class: "muted" }, t("groups.empty")));
   }
-  return h("div", { class: "page" }, header, h("div", { class: "groups-layout" }, groupList(), editor(g)));
+  return h("div", { class: "page" }, header, screenNow(), h("div", { class: "groups-layout" }, groupList(), editor(g)));
 }

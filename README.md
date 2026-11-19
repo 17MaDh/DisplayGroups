@@ -32,8 +32,16 @@ position, rotation, scale and HDR. It can also set the sound output and volume.
 - **Tray and on-screen display:** a quick-switch menu, and a short "Gaming on Couch" toast after
   each switch.
 - **Settings app**
+  - Shows what Windows has on screen now and which group that is. It updates as soon as you
+    change displays in Windows, or when the config changes elsewhere.
+  - **New group** builds a group by hand, without switching to it first. Add each display it
+    turns on, even one that is off right now (a TV). A display starts from its settings in
+    another group, else its current mode, else its native mode from the EDID.
   - A drag-and-drop layout editor, with resolution and refresh pickers from the modes each
     monitor really offers.
+  - **Update from screen** replaces a group's layout with what Windows shows now. After you edit
+    the group that is on screen, it offers to apply the changes, since saving alone does not
+    change your displays.
   - Pages for hotkeys, shortcuts, theme (System/Dark/Light), import/export and diagnostics.
 - **Identify:** shows each screen's number and name on that screen, matching the numbers in the
   layout editor.
@@ -101,8 +109,14 @@ satisfy Smart App Control, even when you trust it on your own PC.
 
 1. Arrange your displays the way you want with Windows Settings → Display. Then, in
    DisplayGroups, choose **Capture current setup** and name the group.
-2. Repeat for each layout you use.
+2. For the other layouts, choose **New group**, name it (for example "Gaming on Couch") and
+   add its displays with **Add a display…**. Set the mode (for example 3840×2160 at 120 Hz),
+   save, and try it with **Test**. Alternatively, switch to the layout in Windows and capture
+   it.
 3. Add a hotkey (Hotkeys page), a shortcut (Shortcuts page), or use the tray menu.
+
+Saving a group never changes your displays by itself. Use **Test**, a hotkey or the tray to
+switch.
 
 ## Command line
 
@@ -168,6 +182,29 @@ Hotkeys live in `config.json`, and the settings app edits them. Example:
 | Scale or refresh rate is not what you set | Check the group in the settings app. Some TVs only offer 120 Hz on certain HDMI ports or in game mode. |
 | Something else | Diagnostics → Open logs folder. Attach the latest log to a bug report. |
 
+## Linux (preview)
+
+A port to Ubuntu's default desktop, GNOME on Wayland or X11, is under way
+([ARCHITECTURE.md §16](ARCHITECTURE.md#16-linux-ubuntu-gnome)). It switches displays through
+GNOME's own display service, the one GNOME Settings uses.
+
+- **Available now: the command line.** These commands work as on Windows:
+  - `status`, `list`, `capture`, `validate`, `apply`, `toggle`;
+  - `duplicate`, `recover [--extend]`, and `displaygroups://` links.
+- **How a switch is confirmed:** GNOME itself asks "Keep these display settings?". `--no-confirm`
+  switches without asking, but GNOME brings back its remembered layout at the next sign-in.
+- **Settings:** in `~/.config/displaygroups/config.json`. A config captured on Windows
+  recognises the same monitors.
+- **Not yet:** the tray agent, hotkeys, automatic switching, the settings app, and
+  `.deb`/AppImage packages.
+
+```bash
+tar xzf DisplayGroups-<version>-linux-x64-cli.tar.gz
+cd DisplayGroups-<version>-linux-x64-cli
+./displaygroups status
+./displaygroups capture "Desktop"
+```
+
 ## Building from source
 
 Requirements:
@@ -186,6 +223,12 @@ Or step by step:
 cd apps\settings; npm ci; npm run build; cd ..\..
 cargo test --workspace
 cargo build --release --features displaygroups-settings/custom-protocol
+```
+
+For Linux, on Ubuntu 24.04 or in WSL, with rustup, `build-essential` and `pkg-config`:
+
+```bash
+bash scripts/build-linux.sh   # checks, tests, release build and dist-release/*-linux-x64-cli.tar.gz
 ```
 
 `npm run tauri dev` in `apps\settings` runs the settings app with live reload. Builds you make

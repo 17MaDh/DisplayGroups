@@ -1,8 +1,10 @@
 //! Where DisplayGroups keeps its files.
 //!
-//! * Installed: config in `%APPDATA%\DisplayGroups`, logs and machine-local state in
+//! * Windows: config in `%APPDATA%\DisplayGroups`, logs and machine-local state in
 //!   `%LOCALAPPDATA%\DisplayGroups`.
-//! * Portable (a `portable.flag` file next to the executable): everything in `.\data`.
+//! * Linux: config in `$XDG_CONFIG_HOME/displaygroups` (`~/.config/displaygroups`), logs
+//!   and state in `$XDG_STATE_HOME/displaygroups` (`~/.local/state/displaygroups`).
+//! * Portable (a `portable.flag` file next to the executable): everything in `./data`.
 
 use std::path::{Path, PathBuf};
 
@@ -28,8 +30,16 @@ impl AppPaths {
                 return Ok(Self::portable(&dir.join("data")));
             }
         }
-        let roaming = env_dir("APPDATA")?.join(APP_DIR);
-        let local = env_dir("LOCALAPPDATA")?.join(APP_DIR);
+        #[cfg(windows)]
+        let (roaming, local) = (
+            env_dir("APPDATA")?.join(APP_DIR),
+            env_dir("LOCALAPPDATA")?.join(APP_DIR),
+        );
+        #[cfg(not(windows))]
+        let (roaming, local) = (
+            xdg_dir("XDG_CONFIG_HOME", ".config")?.join("displaygroups"),
+            xdg_dir("XDG_STATE_HOME", ".local/state")?.join("displaygroups"),
+        );
         Ok(Self {
             config_file: roaming.join("config.json"),
             icons_dir: roaming.join("icons"),
@@ -70,6 +80,15 @@ fn env_dir(name: &'static str) -> Result<PathBuf, ModelError> {
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .ok_or(ModelError::MissingEnv(name))
+}
+
+/// An XDG base directory: the variable if set to an absolute path, else `$HOME/<default>`.
+#[cfg(not(windows))]
+fn xdg_dir(name: &'static str, default: &str) -> Result<PathBuf, ModelError> {
+    match std::env::var_os(name).map(PathBuf::from) {
+        Some(p) if p.is_absolute() => Ok(p),
+        _ => Ok(env_dir("HOME")?.join(default)),
+    }
 }
 
 #[cfg(test)]

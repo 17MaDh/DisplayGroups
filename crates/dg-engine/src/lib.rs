@@ -27,7 +27,7 @@ mod tests;
 pub use backend::{AudioBackend, AudioEndpoint, DeviceMode, DisplayBackend, HdrState, ModeChange};
 pub use engine::{
     next_in_cycle, ActiveDisplay, ApplyOptions, Captured, Confirmer, ConnectedMonitor, Engine,
-    EngineOptions, RecoverMethod, Status,
+    EngineOptions, NewMonitor, PreferredMode, RecoverMethod, Status,
 };
 pub use error::EngineError;
 pub use plan::Strategy;
