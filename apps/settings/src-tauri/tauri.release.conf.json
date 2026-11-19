@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "category": "Utility",
+    "shortDescription": "Switch between groups of displays",
+    "longDescription": "Organize monitors, TVs and projectors into groups and switch between them with a hotkey, a shortcut or the tray.",
+    "licenseFile": "../../../LICENSE",
+    "icon": ["icons/icon.ico"],
+    "externalBin": ["binaries/displaygroups", "binaries/displaygroupsw"],
+    "resources": {
+      "../../../locales/*.json": "locales/"
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "perMachine",
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "./installer-hooks.nsh"
+      }
+    }
+  }
+}

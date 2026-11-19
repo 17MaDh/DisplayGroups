@@ -30,6 +30,8 @@
   },
   "bundle": {
     "active": false,
+    "publisher": "DisplayGroups contributors",
+    "copyright": "Copyright (c) 2026 DisplayGroups contributors",
     "icon": ["icons/icon.ico"]
   }
 }

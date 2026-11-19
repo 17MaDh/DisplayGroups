@@ -417,6 +417,24 @@ fn builtin_icons() -> BTreeMap<String, String> {
         .collect()
 }
 
+/// Hotkeys, the tray and the OSD live in the agent. Opening the settings app (for
+/// example from the installer's last page) starts it if it is not running, so the
+/// hotkeys being edited are live. Debug builds never start it, and neither does
+/// `DISPLAYGROUPS_NO_AGENT=1`, so working on the UI does not arm real hotkeys.
+fn start_agent(exe_dir: &std::path::Path) {
+    if cfg!(debug_assertions) || std::env::var_os("DISPLAYGROUPS_NO_AGENT").is_some() {
+        return;
+    }
+    let agent = exe_dir.join("displaygroupsw.exe");
+    if dg_win::agent::is_running() || !agent.is_file() {
+        return;
+    }
+    let _ = Command::new(agent)
+        .arg("agent")
+        .current_dir(exe_dir)
+        .spawn();
+}
+
 fn main() {
     let exe_dir = std::env::current_exe()
         .ok()
@@ -429,6 +447,7 @@ fn main() {
             return;
         }
     };
+    start_agent(&exe_dir);
     tauri::Builder::default()
         .manage(App { paths, exe_dir })
         .setup(|app| {

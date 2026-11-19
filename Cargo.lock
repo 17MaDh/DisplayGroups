@@ -825,6 +825,7 @@ dependencies = [
  "dg-ipc",
  "dg-model",
  "dg-win",
+ "embed-resource",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

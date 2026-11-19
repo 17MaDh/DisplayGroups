@@ -75,6 +75,24 @@
 >   - Picking a custom icon file from the UI (the CLI's `shortcut --icon` supports it).
 >   - Translations beyond English.
 >
+> **Phase 5 (packaging and release) done.** §13 has the details.
+> - **Installer:** Tauri's NSIS bundler, per-machine, with DisplayGroups hooks.
+> - **Portable ZIP**, plus `SHA256SUMS.txt`.
+> - **Scripts:** `scripts/build.ps1` and `scripts/sign.ps1`.
+> - **`release.yml`:** tag → tests → package → SignPath signing in rounds → checks every
+>   signature → draft release.
+> - **Version resources and icons** on all three executables.
+> - **Docs:** README, CONTRIBUTING, SECURITY and `docs/releasing.md`.
+> - **Checked on the test machine, nothing installed:**
+>   - Both packages were built and inspected: ZIP entries, the generated NSIS script and the
+>     hooks compiled without warnings.
+>   - The uninstaller is byte-reproducible across builds.
+>   - A simulated signing round swapped and queued the right files.
+> - **Not done yet:**
+>   - Running the installer. It changes the system, so it waits for the VM checklist in
+>     `docs/releasing.md`.
+>   - The lock-screen service is not in the installer while the §8.5 spike is pending.
+>
 > Items marked **[VERIFIED]** were observed on real hardware (Windows 11 26H2 build 26300, RTX 5080,
 > ASUS XG32UCWMG + DFI27280 + Samsung 65" TV over HDMI) while building the PowerShell prototype this
 > project replaces. Items marked **[SPIKE]** are unproven and get a go/no-go test before code depends on them.
@@ -171,16 +189,13 @@ DisplayGroups/
 ├─ apps/
 │  ├─ cli/                       # displaygroups.exe + displaygroupsw.exe (agent + OSD in Phase 3)
 │  ├─ svc/                       # displaygroups-svc.exe (service + broker)                  (Phase 3)
-│  └─ settings/                  # Tauri v2: src-tauri/ + ui/ (TypeScript, Vite, Fluent UI WC) (Phase 4)
-├─ assets/icons/                 # built-in SVG sources + generated multi-size .ico
+│  └─ settings/                  # Tauri v2: src-tauri/ + ui/ (TypeScript, Vite, hand-written Fluent CSS)
+│                                #   src-tauri/tauri.release.conf.json + installer-hooks.nsh: the installer (§13)
 ├─ locales/                      # en.json (UI strings; shared by settings UI and agent tray/OSD)
-├─ tests/fixtures/topologies/    # recorded QueryDisplayConfig dumps
-├─ installer/nsis/               # per-machine installer, optional service + URI components (Phase 5)
-├─ packaging/portable/           # portable ZIP layout + portable.flag                        (Phase 5)
-├─ scripts/                      # build.ps1, sign.ps1 (no-op without secrets)
+├─ scripts/                      # build.ps1 (installer, portable ZIP, checksums), sign.ps1 (§13)
 ├─ tools/lockscreen-spike/       # §8.5 go/no-go test; test machines only (docs/lockscreen-spike.md)
 ├─ .github/workflows/            # ci.yml (push/PR), release.yml (tags)
-├─ docs/                         # CLI reference, troubleshooting
+├─ docs/                         # lockscreen-spike.md, releasing.md
 └─ README.md  ARCHITECTURE.md  CONTRIBUTING.md  SECURITY.md  LICENSE
 ```
 
@@ -541,7 +556,7 @@ Tool: `tools/lockscreen-spike`; steps in `docs/lockscreen-spike.md`. The broker 
   never fail the switch.
 
 ### 11.2 `displaygroups://` URI protocol
-- **Opt-in**, from the installer checkbox or a Settings toggle.
+- **Opt-in**, from the installer's question (default No) or a Settings toggle.
 - Registered per user under `HKCU\Software\Classes\displaygroups` with the command
   `"<dir>\displaygroupsw.exe" uri "%1"`.
 - Accepted forms only: `displaygroups://apply/<uuid>` and `displaygroups://toggle/<uuid>,<uuid>`. Each
@@ -595,16 +610,69 @@ Tool: `tools/lockscreen-spike`; steps in `docs/lockscreen-spike.md`. The broker 
 
 ## 13. Packaging, signing and Smart App Control (Phase 5)
 
-- **Installer:** NSIS, per-machine, installed to `%ProgramFiles%\DisplayGroups`. Optional components:
-  the lock-screen service and the `displaygroups://` protocol. Uninstall removes everything and asks
-  before deleting user config.
-- **Portable ZIP:** `portable.flag` switches the config to `.\data\`. There is no service, and lock-screen features are hidden with an explanation.
-- **Release workflow:** on tag, run fmt, clippy and tests, then build, **sign**, run NSIS, make the ZIP
-  and `SHA256SUMS.txt`, and publish the GitHub Release.
-- **Signing:** `scripts/sign.ps1` signs every `.exe`, `.dll` and the installer. It is a no-op without
-  secrets, and the target is SignPath Foundation (D3).
-- **Smart App Control:** it blocks unsigned binaries, and a self-signed certificate does not count,
-  even when trusted locally. The README explains this, along with SmartScreen and building from source.
+**Installer.** Tauri's NSIS bundler with `apps/settings/src-tauri/tauri.release.conf.json` and the
+hooks in `installer-hooks.nsh`.
+- **Layout:** per-machine install to `%ProgramFiles%\DisplayGroups`:
+  - `displaygroups-settings.exe` (the main binary);
+  - `displaygroups.exe` and `displaygroupsw.exe` (Tauri sidecars);
+  - `locales\*.json`.
+  Per-machine is because the optional lock-screen service needs it. That service is **not** in
+  the installer until the §8.5 spike passes.
+- **Interactive install:**
+  - Asks about "Start with Windows" (default Yes) and `displaygroups://` (default No). Each
+    question appears only if that setting is not already on.
+  - Both answers run the CLI (`startup on`, `protocol on`) and write to HKCU.
+  - The finish page starts the settings app de-elevated (`RunAsUser`), and it starts the agent if
+    it is not running.
+- **Silent install** (`/S`) asks nothing.
+- **Before install and uninstall:** the agent and settings app are stopped.
+- **Uninstall:**
+  - Runs `startup off` and `protocol off`.
+  - Removes `Start Menu\Programs\DisplayGroups`, where app-made shortcuts live.
+  - With Tauri's "Delete the application data" ticked, also deletes `%APPDATA%\DisplayGroups` and
+    `%LOCALAPPDATA%\DisplayGroups`.
+  - During an upgrade (`$UpdateMode`), integration and data are kept.
+- **WebView2:** the bootstrapper is downloaded at install time only if WebView2 is missing.
+
+**Portable ZIP.** The three executables, `locales\`, README, license and `portable.flag`, which
+switches all data to `.\data\`. It has no service. Lock-screen features will be hidden there, with
+an explanation.
+
+**Executables.**
+- All three carry the icon and a version resource:
+  - the CLI's comes from `apps/cli/build.rs` (embed-resource);
+  - the settings app's comes from Tauri.
+- Task Manager and "Startup apps" show the agent as "DisplayGroups".
+
+**Build.** `scripts/build.ps1`:
+- **Binaries stage:** UI, tests, release build.
+- **Package stage:** installer, ZIP, `SHA256SUMS.txt`, into `dist-release\`.
+- **Versions:** it refuses to run if `Cargo.toml`, `tauri.conf.json`, `package.json` and the tag
+  disagree.
+- **Patching:** `--no-binary-patching` keeps Tauri from rewriting (and un-signing) the main
+  executable. That patching only serves Tauri's updater, which is v1.1 (§15).
+
+**Signing.** Tauri's bundler calls `scripts/sign.ps1` for every PE file it signs:
+- the executables;
+- the five NSIS plugin DLLs;
+- the uninstaller, while `makensis` runs;
+- the installer.
+
+The modes are unset (no-op), `signtool` (local certificate) and `signpath`.
+
+SignPath Foundation needs origin-verified requests from its GitHub action, which is a workflow
+step and cannot be called from the bundler. So `release.yml` packages in rounds:
+1. Each file without a signed copy is queued under its SHA-256, and signed.
+2. The uninstaller is signed again: it embeds the now-signed plugins, so its bytes changed.
+3. Nothing may remain unsigned except the installer, which is signed last.
+
+This works because NSIS output is deterministic for the same inputs, as observed. Finally the
+workflow unpacks the installer and the ZIP and fails on any unsigned `.exe` or `.dll`.
+Onboarding questions for SignPath are listed in `docs/releasing.md`.
+
+**Smart App Control.** It blocks unsigned binaries, including installer plugins and the
+uninstaller, which is why all of them are signed. A self-signed certificate does not count, even
+when trusted locally. The README explains this, along with SmartScreen and checksum checks.
 
 ---
 

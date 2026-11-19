@@ -8,6 +8,10 @@
 node_modules/
 apps/settings/dist/
 apps/settings/src-tauri/gen/
+apps/settings/src-tauri/binaries/
+
+# Release output of scripts/build.ps1
+/dist-release/
 
 # Editors and OS
 .vs/

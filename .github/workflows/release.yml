@@ -1,0 +1,214 @@
+name: Release
+
+# Pushing a tag such as v1.0.0 builds, tests and (when SignPath is set up) signs a
+# release, then creates a *draft* GitHub release with the installer, the portable ZIP
+# and SHA256SUMS.txt. A maintainer reviews the draft and publishes it by hand.
+#
+# Signing is optional. It is on when the repository variable SIGNPATH_ORGANIZATION_ID
+# is set; docs/releasing.md lists the other variables, the secret and the SignPath
+# artifact configurations. Without it the release is unsigned and the draft says so.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, sign and draft the release
+    # GitHub-hosted, as SignPath's open-source signing requires for every job that
+    # leads to a signing request.
+    runs-on: windows-latest
+    permissions:
+      contents: write # create the draft release
+      actions: read # SignPath downloads the uploaded workflow artifacts
+    env:
+      SIGNPATH: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: apps/settings/package-lock.json
+
+      # No Rust build cache in release builds: everything is built from the tagged source.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test and build the executables
+        run: ./scripts/build.ps1 -Stage Binaries -Version $env:GITHUB_REF_NAME
+
+      # ---- Unsigned release ---------------------------------------------------------
+
+      - name: Package (unsigned)
+        if: env.SIGNPATH != 'true'
+        run: ./scripts/build.ps1 -Stage Package -Version $env:GITHUB_REF_NAME
+
+      # ---- Signed release (SignPath) ------------------------------------------------
+      # A signing request is a workflow step, so the release is packaged in rounds
+      # (docs/releasing.md). Each Package run swaps every file that already has a signed
+      # copy and queues the rest:
+      #   round 1  the executables, the NSIS plugin DLLs and an uninstaller
+      #   round 2  the uninstaller again: it embeds the plugins, now signed
+      #   round 3  nothing may be left but the installer, which is signed last.
+
+      - name: Signing folder
+        if: env.SIGNPATH == 'true'
+        run: |
+          "DG_SIGN_MODE=signpath" >> $env:GITHUB_ENV
+          "DG_SIGN_DIR=$env:RUNNER_TEMP\dg-sign" >> $env:GITHUB_ENV
+
+      - name: Package, round 1
+        if: env.SIGNPATH == 'true'
+        id: round1
+        run: ./scripts/build.ps1 -Stage Package -Version $env:GITHUB_REF_NAME
+
+      - name: Upload the round 1 files
+        if: env.SIGNPATH == 'true' && steps.round1.outputs.pending != '0'
+        id: upload1
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-round1
+          path: ${{ env.DG_SIGN_DIR }}/unsigned/
+          if-no-files-found: error
+
+      - name: Sign the round 1 files
+        if: env.SIGNPATH == 'true' && steps.round1.outputs.pending != '0'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_FILES_CONFIGURATION }}
+          github-artifact-id: ${{ steps.upload1.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: ${{ env.DG_SIGN_DIR }}/signed/round1
+
+      - name: Package, round 2
+        if: env.SIGNPATH == 'true'
+        id: round2
+        run: ./scripts/build.ps1 -Stage Package -Version $env:GITHUB_REF_NAME
+
+      - name: Upload the round 2 files
+        if: env.SIGNPATH == 'true' && steps.round2.outputs.pending != '0'
+        id: upload2
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-round2
+          path: ${{ env.DG_SIGN_DIR }}/unsigned/
+          if-no-files-found: error
+
+      - name: Sign the round 2 files
+        if: env.SIGNPATH == 'true' && steps.round2.outputs.pending != '0'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_FILES_CONFIGURATION }}
+          github-artifact-id: ${{ steps.upload2.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: ${{ env.DG_SIGN_DIR }}/signed/round2
+
+      - name: Package, round 3
+        if: env.SIGNPATH == 'true'
+        id: round3
+        run: |
+          ./scripts/build.ps1 -Stage Package -Version $env:GITHUB_REF_NAME
+          if ((Get-Content $env:GITHUB_OUTPUT | Select-Object -Last 1) -ne 'pending=0') {
+            throw 'Files are still unsigned after two signing rounds; see the list above.'
+          }
+
+      - name: Upload the installer
+        if: env.SIGNPATH == 'true'
+        id: upload-installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-installer
+          path: dist-release/*-setup-x64.exe
+          if-no-files-found: error
+
+      - name: Sign the installer
+        if: env.SIGNPATH == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_INSTALLER_CONFIGURATION }}
+          github-artifact-id: ${{ steps.upload-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: ${{ env.DG_SIGN_DIR }}/installer
+
+      - name: Use the signed installer and check every signature
+        if: env.SIGNPATH == 'true'
+        run: |
+          Copy-Item "$env:DG_SIGN_DIR/installer/*-setup-x64.exe" dist-release/ -Force
+          ./scripts/build.ps1 -Stage Checksums
+
+          $check = Join-Path $env:RUNNER_TEMP 'dg-check'
+          Get-ChildItem dist-release -Filter *.zip | ForEach-Object {
+            Expand-Archive $_.FullName -DestinationPath (Join-Path $check 'zip') -Force
+          }
+          # 7-Zip, preinstalled on the runner, unpacks NSIS installers.
+          Get-ChildItem dist-release -Filter *-setup-x64.exe | ForEach-Object {
+            7z x $_.FullName "-o$(Join-Path $check 'installer')" -y | Out-Null
+          }
+          $files = @(Get-ChildItem dist-release -Filter *.exe) +
+                   @(Get-ChildItem $check -Recurse -Include *.exe, *.dll)
+          $files | ForEach-Object { '{0,-10} {1}' -f (Get-AuthenticodeSignature $_.FullName).Status, $_.FullName }
+          $bad = @($files | Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' })
+          if ($bad) { throw "Not signed: $($bad.Name -join ', ')" }
+
+      # ---- Draft release ------------------------------------------------------------
+
+      - name: Release notes
+        run: |
+          $signed = if ($env:SIGNPATH -eq 'true') {
+            'The installer and executables are signed. Free code signing provided by SignPath.io, certificate by SignPath Foundation.'
+          } else {
+            'This build is **not code-signed**. Windows SmartScreen will warn, and on PCs with Smart App Control turned on it will not run. See "Smart App Control and SmartScreen" in the README.'
+          }
+          @"
+          $signed
+
+          Check a download against ``SHA256SUMS.txt``:
+
+          ``````powershell
+          (Get-FileHash .\DisplayGroups-*-setup-x64.exe -Algorithm SHA256).Hash
+          ``````
+          "@ | Set-Content -Encoding utf8 release-notes.md
+
+      - name: Create the draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: DisplayGroups ${{ github.ref_name }}
+          body_path: release-notes.md
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist-release/*-setup-x64.exe
+            dist-release/*-portable-x64.zip
+            dist-release/SHA256SUMS.txt
