@@ -6,7 +6,8 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::config::{
-    names_equal, Action, Config, Group, HotkeyAction, MAX_CONFIRM_SECONDS, SCALE_STEPS,
+    names_equal, Action, Config, Group, HotkeyAction, TriggerWhen, MAX_CONFIRM_SECONDS,
+    MAX_REVERT_DELAY_MS, SCALE_STEPS,
 };
 use crate::geometry::{is_connected, Rect};
 
@@ -116,6 +117,57 @@ pub fn validate(cfg: &Config) -> Vec<Issue> {
         }
         for id in ids.iter().filter(|id| !group_ids.contains(id)) {
             sink.error(format!("{hp}.action"), format!("unknown group id {id}"));
+        }
+    }
+
+    let mut trigger_ids = HashSet::new();
+    for (ti, tr) in cfg.triggers.iter().enumerate() {
+        let tp = format!("triggers[{ti}]");
+        if !trigger_ids.insert(tr.id) {
+            sink.error(
+                format!("{tp}.id"),
+                format!("duplicate trigger id {}", tr.id),
+            );
+        }
+        if !group_ids.contains(&tr.group) {
+            sink.error(
+                format!("{tp}.group"),
+                format!("unknown group id {}", tr.group),
+            );
+        }
+        if tr.revert_delay_ms > MAX_REVERT_DELAY_MS {
+            sink.error(
+                format!("{tp}.revertDelayMs"),
+                format!("must be 0..={MAX_REVERT_DELAY_MS}"),
+            );
+        }
+        if let TriggerWhen::Program {
+            names,
+            window_title,
+        } = &tr.when
+        {
+            if names.iter().all(|n| n.trim().is_empty()) {
+                sink.error(format!("{tp}.when.names"), "no program names");
+            }
+            for name in names.iter().filter(|n| !n.trim().is_empty()) {
+                if name.contains(['\\', '/', ':']) {
+                    sink.error(
+                        format!("{tp}.when.names"),
+                        format!("\"{name}\" must be a file name such as game.exe, not a path"),
+                    );
+                } else if !name.trim().to_ascii_lowercase().ends_with(".exe") {
+                    sink.warning(
+                        format!("{tp}.when.names"),
+                        format!("\"{name}\" does not end in .exe"),
+                    );
+                }
+            }
+            if window_title.as_deref().is_some_and(|t| t.trim().is_empty()) {
+                sink.warning(
+                    format!("{tp}.when.windowTitle"),
+                    "the window title filter is empty and is ignored",
+                );
+            }
         }
     }
 
@@ -310,6 +362,94 @@ mod tests {
     fn valid_config_has_no_issues() {
         let issues = validate(&base());
         assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    fn trigger(group: Uuid, when: TriggerWhen) -> Trigger {
+        Trigger {
+            id: Uuid::new_v4(),
+            enabled: true,
+            when,
+            group,
+            switch_back: true,
+            revert_delay_ms: DEFAULT_REVERT_DELAY_MS,
+            confirm: false,
+            extra: Default::default(),
+        }
+    }
+
+    #[test]
+    fn triggers_are_checked() {
+        let mut cfg = base();
+        let desk = cfg.groups[0].id;
+        cfg.triggers.push(trigger(
+            desk,
+            TriggerWhen::Program {
+                names: vec!["EldenRing.exe".into()],
+                window_title: None,
+            },
+        ));
+        cfg.triggers.push(trigger(desk, TriggerWhen::Controller));
+        assert!(validate(&cfg).is_empty(), "{:?}", validate(&cfg));
+
+        let mut bad = cfg.clone();
+        bad.triggers[0].group = Uuid::new_v4();
+        bad.triggers[0].revert_delay_ms = MAX_REVERT_DELAY_MS + 1;
+        bad.triggers[1].id = bad.triggers[0].id;
+        let issues = validate(&bad);
+        for needle in ["unknown group", "revertDelayMs", "duplicate trigger"] {
+            assert!(
+                issues
+                    .iter()
+                    .any(|i| i.message.contains(needle) || i.path.contains(needle)),
+                "{needle}: {issues:?}"
+            );
+        }
+
+        let mut paths = cfg.clone();
+        paths.triggers[0].when = TriggerWhen::Program {
+            names: vec![r"C:\Games\game.exe".into(), "steam".into()],
+            window_title: Some(" ".into()),
+        };
+        let issues = validate(&paths);
+        assert!(issues
+            .iter()
+            .any(|i| i.severity == Severity::Error && i.message.contains("not a path")));
+        assert!(issues
+            .iter()
+            .any(|i| i.severity == Severity::Warning && i.message.contains(".exe")));
+        assert!(issues.iter().any(|i| i.path.ends_with("windowTitle")));
+
+        paths.triggers[0].when = TriggerWhen::Program {
+            names: vec!["  ".into()],
+            window_title: None,
+        };
+        assert!(validate(&paths)
+            .iter()
+            .any(|i| i.message == "no program names"));
+    }
+
+    #[test]
+    fn triggers_round_trip_with_defaults() {
+        let json = r#"{"id":"6b0f2c1e-8a7d-4c1e-9f0a-1b2c3d4e5f60","when":{"type":"controller"},
+                       "group":"6b0f2c1e-8a7d-4c1e-9f0a-1b2c3d4e5f61","future":1}"#;
+        let t: Trigger = serde_json::from_str(json).unwrap();
+        assert!(t.enabled && t.switch_back && !t.confirm);
+        assert_eq!(t.revert_delay_ms, DEFAULT_REVERT_DELAY_MS);
+        assert_eq!(t.when, TriggerWhen::Controller);
+        let back = serde_json::to_value(&t).unwrap();
+        assert_eq!(back["future"], 1);
+        assert_eq!(back["switchBack"], true);
+        let program: TriggerWhen = serde_json::from_str(
+            r#"{"type":"program","names":["steam.exe"],"windowTitle":"Big Picture"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            program,
+            TriggerWhen::Program {
+                names: vec!["steam.exe".into()],
+                window_title: Some("Big Picture".into())
+            }
+        );
     }
 
     #[test]

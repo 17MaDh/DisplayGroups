@@ -16,6 +16,7 @@ pub mod refresh;
 mod report;
 pub mod resolve;
 pub mod snapshot;
+pub mod triggers;
 
 #[cfg(any(test, feature = "fake"))]
 pub mod fake;

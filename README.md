@@ -44,6 +44,10 @@ position, rotation, scale and HDR. It can also set the sound output and volume.
   - By default the app follows the Windows display language.
   - Another language is one JSON file ([CONTRIBUTING.md](CONTRIBUTING.md#translations)).
 - **Links:** `displaygroups://` links for Stream Deck and automation tools (opt-in).
+- **Automatic switching:** switches to a group when a program starts (a game, or Steam in Big
+  Picture) or a game controller connects, and back when it ends.
+  - It reacts to changes only, so Steam starting with Windows doesn't move you to the TV.
+  - It switches back only if you are still on that group.
 - **Disconnect fallback:** optionally switches to a fallback group when a display disappears.
 - **Before/after actions** (off by default): run a program or command as you, never as a
   system service.

@@ -73,6 +73,20 @@
 > - **Left for Phase 6, now done:** "Identify", picking a custom icon file in the UI, and a
 >   second language (Arabic).
 >
+> **v1.1, automatic switching (§15.1) done:**
+> - **Pieces:**
+>   - Schema and validation (`triggers`).
+>   - The decision state machine in `dg-engine::triggers` (10 tests).
+>   - `dg-win::detect` for programs, window titles and controllers.
+>   - Agent wiring (2 s program poll; controller check after device changes).
+>   - The "Automatic switching" page, in English and Arabic.
+> - **Cost, measured:** a process snapshot takes ~7 ms, the controller check ~2 ms.
+> - **Checked on the test machine in `--dry-run`, displays unchanged:**
+>   - A `ping.exe` trigger switched (OSD) within one poll of starting.
+>   - It switched back 6 s after the program ended, with a 3 s delay.
+> - **Not tried yet:** a real controller connecting.
+> - **Next in v1.1:** window positions (§15.2), DDC/CI (§15.3), the update notice (§15.4).
+>
 > **Phase 6 (completing v1.0) done:**
 > - **Identify:**
 >   - `displaygroups identify` and a button in the editor.
@@ -127,7 +141,8 @@
 | D4 | Toolchain: rustup (stable MSVC), Visual Studio Build Tools 2022 (C++ workload + Windows SDK) and Git. Node.js LTS is installed when Phase 4 starts, because Phases 2–3 don't need it | Approved |
 | D5 | Repository at `C:\Users\ahmad\Projects\DisplayGroups`, MIT license | Approved |
 | D6 | v1.0 additions: theme switcher, flash-free launch, motion, i18n/RTL readiness, OSD, Duplicate Group, per-group volume, pre/post-switch actions, `displaygroups://` URI, disconnect auto-fallback | Approved (§9–§11) |
-| D7 | Deferred to v1.1: window-position restore, automatic triggers, DDC/CI brightness, auto-updater | Roadmap only (§15) |
+| D7 | Deferred to v1.1: window-position restore, automatic triggers, DDC/CI brightness, auto-updater | Planned in §15 |
+| D8 | v1.1 choices (2026-11-19). **Order:** automatic switching first, then window positions, DDC/CI, and the update notice last. **Triggers:** a program starting (switch back when it ends) and a game controller connecting. **Windows:** saved automatically per group. **Updates:** notice only, off by default; never downloads or installs | Approved (§15); §15.1 done |
 
 ---
 
@@ -728,9 +743,108 @@ Real switching is tested on the VM / secondary PC (D3).
 
 ---
 
-## 15. Roadmap — deferred to v1.1 (not in v1.0)
+## 15. v1.1 (D8)
 
-- Saving and restoring open window positions across switches.
-- Automatic profile triggers (game launch, controller connect).
-- DDC/CI hardware brightness control.
-- Built-in GitHub Releases auto-updater.
+The features come in this order. Each one is a phase of its own, with tests and docs.
+
+### 15.1 Automatic switching (triggers)
+
+**What it does.** The agent switches to a group when:
+- one of the given programs starts, for example `eldenring.exe`, or `steam.exe` with a window
+  titled "Big Picture"; or
+- a game controller connects.
+
+When the condition ends, it can switch back to the group that was on screen before.
+
+**Schema** (additive, still schema 1). Top-level `triggers: Trigger[]`:
+
+```jsonc
+{
+  "id": "uuid",
+  "enabled": true,
+  "when": { "type": "program", "names": ["eldenring.exe"], "windowTitle": null },
+  //    or { "type": "controller" }
+  "group": "uuid",          // switch to
+  "switchBack": true,       // when the condition ends
+  "revertDelayMs": 5000,    // how long it must stay ended (launchers restart games)
+  "confirm": false          // show "Keep these display settings?"
+}
+```
+
+**Detection.** All of it runs in the agent, as the user, with no admin rights and no hooks into
+other processes.
+- **Programs:**
+  - The agent polls every 2 s with a Toolhelp process snapshot, comparing executable names
+    case-insensitively.
+  - The poll runs only while an enabled program trigger exists.
+  - `windowTitle` additionally needs a visible top-level window of that process whose title
+    contains the text.
+  - Process names are compared in memory only. Nothing is logged unless a trigger matches.
+- **Controllers:** checked at start, and 1 s after each device-change broadcast
+  (`WM_DEVICECHANGE`). There is no polling. A controller is connected when either:
+  - an XInput slot is connected (Xbox-compatible pads); or
+  - a present HID interface has usage page 1 with usage 4 (joystick) or 5 (gamepad), which
+    covers DualSense, Switch Pro and generic pads.
+
+**Decisions** are a pure state machine in `dg-engine::triggers`, unit-tested without Windows.
+- **Edges only:**
+  - A trigger reacts to its condition *changing*.
+  - A program already running when the agent starts, or when the trigger is added or edited,
+    does not switch. This covers Steam starting at sign-in, for example.
+  - After it fires, a trigger waits for its condition to end before it can fire again, so a
+    reverted or failed switch is not retried in a loop.
+- **On:** if the screen is not already on the trigger's group, the agent switches to it and
+  remembers the group that was on screen.
+- **Off:** the condition must stay false for `revertDelayMs`. The agent then switches back only
+  if all of these hold:
+  - `switchBack` is on;
+  - the remembered group exists;
+  - the screen still shows the trigger's group, so the user has not switched away by hand;
+  - no other active trigger targets the same group.
+- **One switch at a time:** at most one decision per evaluation. Nothing is evaluated while a
+  switch is running or the session is locked; edges are caught on the next evaluation.
+- **Dry run:** `agent --dry-run` shows the OSD for each decision, and tracks the would-be current
+  group, so switch-back can be tried without changing displays.
+
+**Safety.**
+- **The countdown is off by default** for trigger switches (`confirm: false`). A dialog that
+  needs a click within 15 s, shown over a game started from the couch, would revert the very
+  switch the trigger was made for.
+- **Monitor check:** a switch whose monitors are not all connected fails with `MonitorMissing`
+  before anything changes, as for any switch.
+- **Ways back:** the hotkeys, `recover` and switch-back remain.
+- **Actions:** before/after actions run as for hotkey switches, in user context.
+
+**Settings app:** an "Automatic switching" page lists triggers. Programs can be typed or picked
+from the programs that have a window open right now. Windows shell processes and DisplayGroups
+itself are left out of that list.
+
+**Diagnostics:** `cargo run -p dg-win --example detect_probe` prints what detection sees (counts
+and timings; `-- --names` adds program names), for bug reports about controllers.
+
+### 15.2 Window positions (planned)
+
+- **Opt-in per group** (`group.windows.remember`).
+- **Leaving a group:** the agent records the placement of visible, non-cloaked, non-tool
+  top-level windows, keyed by executable, window class and title.
+- **Returning to it:** it restores them with `SetWindowPlacement`, after the switch settles.
+- **Scope:** user context only. Elevated windows are skipped (UIPI). Nothing is moved while the
+  session is locked.
+
+### 15.3 DDC/CI brightness (planned)
+
+- Optional per display: `display.brightness: 0..=100`.
+- **Mechanism:** applied after a switch with `SetVCPFeature(0x10)` through
+  `GetPhysicalMonitorsFromHMONITOR` (dxva2).
+- **Failures:** monitors without DDC/CI, including most TVs over HDMI, are logged and skipped.
+  They never fail a switch.
+
+### 15.4 Update notice (planned)
+
+- **Off by default.** It is the only network access DisplayGroups would ever make, and
+  SECURITY.md will say so when it ships.
+- **Check:** when on, the agent asks GitHub's "latest release" API once a day. Requests carry no
+  identifiers.
+- **Notice:** if the release is newer, it shows a tray notification with a link to the release
+  page.
+- **Never** downloads or installs anything (D8).

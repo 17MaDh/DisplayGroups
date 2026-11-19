@@ -9,11 +9,13 @@ import { renderGroups } from "./pages/groups";
 import { renderHotkeys } from "./pages/hotkeys";
 import { renderSettings } from "./pages/settings";
 import { renderShortcuts } from "./pages/shortcuts";
+import { renderTriggers } from "./pages/triggers";
 import { changed, dirty, discard, reload, save, state, subscribe, type Page } from "./state";
 
 const NAV: [Page, string, string][] = [
   ["groups", "", "nav.groups"],
   ["hotkeys", "", "nav.hotkeys"],
+  ["triggers", "\uE945", "nav.triggers"],
   ["shortcuts", "", "nav.shortcuts"],
   ["settings", "", "nav.settings"],
   ["diagnostics", "", "nav.diagnostics"],
@@ -22,6 +24,7 @@ const NAV: [Page, string, string][] = [
 const PAGES: Record<Page, () => HTMLElement> = {
   groups: renderGroups,
   hotkeys: renderHotkeys,
+  triggers: renderTriggers,
   shortcuts: renderShortcuts,
   settings: renderSettings,
   diagnostics: renderDiagnostics,

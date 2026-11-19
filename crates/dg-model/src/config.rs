@@ -32,6 +32,9 @@ pub struct Config {
     pub groups: Vec<Group>,
     #[serde(default)]
     pub hotkeys: Vec<Hotkey>,
+    /// Automatic switching (ARCHITECTURE.md §15.1). Added in v1.1; still schema 1.
+    #[serde(default)]
+    pub triggers: Vec<Trigger>,
     #[serde(default)]
     pub settings: Settings,
     #[serde(flatten)]
@@ -45,6 +48,7 @@ impl Default for Config {
             monitors: BTreeMap::new(),
             groups: Vec::new(),
             hotkeys: Vec::new(),
+            triggers: Vec::new(),
             settings: Settings::default(),
             extra: Map::new(),
         }
@@ -406,6 +410,59 @@ pub enum HotkeyAction {
     Toggle { groups: Vec<Uuid> },
     Cycle { groups: Vec<Uuid> },
     Recover,
+}
+
+/// Default for [`Trigger::revert_delay_ms`]: launchers often restart the game.
+pub const DEFAULT_REVERT_DELAY_MS: u32 = 5000;
+/// Upper bound for [`Trigger::revert_delay_ms`] (10 minutes).
+pub const MAX_REVERT_DELAY_MS: u32 = 600_000;
+
+/// Automatic switching (ARCHITECTURE.md §15.1): switch to `group` while `when` holds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Trigger {
+    pub id: Uuid,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    pub when: TriggerWhen,
+    /// The group to switch to.
+    pub group: Uuid,
+    /// Switch back to the previous group when the condition ends.
+    #[serde(default = "yes")]
+    pub switch_back: bool,
+    /// How long the condition must stay ended before switching back.
+    #[serde(default = "default_revert_delay")]
+    pub revert_delay_ms: u32,
+    /// Show "Keep these display settings?" (off: a game started from the couch should
+    /// not need a click within 15 s).
+    #[serde(default)]
+    pub confirm: bool,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum TriggerWhen {
+    /// One of these programs runs. `names` are executable file names such as
+    /// `eldenring.exe`, compared case-insensitively. With `window_title`, a visible window
+    /// of that program must also have a title containing it (e.g. Steam's "Big Picture").
+    Program {
+        names: Vec<String>,
+        // `rename_all` on the enum renames variants, not their fields.
+        #[serde(
+            default,
+            rename = "windowTitle",
+            skip_serializing_if = "Option::is_none"
+        )]
+        window_title: Option<String>,
+    },
+    /// A game controller is connected.
+    Controller,
+}
+
+fn default_revert_delay() -> u32 {
+    DEFAULT_REVERT_DELAY_MS
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

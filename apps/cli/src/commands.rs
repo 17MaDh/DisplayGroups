@@ -24,6 +24,8 @@ pub(crate) enum Trigger {
     Hotkey,
     Tray,
     Fallback,
+    /// Automatic switching (ARCHITECTURE.md §15.1).
+    Auto,
 }
 
 /// Minimum gap between two `displaygroups://` switches.

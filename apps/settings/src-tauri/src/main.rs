@@ -441,6 +441,15 @@ fn apply_group(app: State<App>, id: Uuid) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", exe.display()))
 }
 
+/// Programs with a window open right now, to pick one for a trigger (lower-case
+/// executable names, without Windows shell processes).
+#[tauri::command]
+async fn running_programs() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(dg_win::detect::programs_with_windows)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// "Choose file…" for a group icon: the Windows Open dialog, then the file is stored in
 /// the icons folder as `.ico`. Returns the value for `group.icon`; `None` if cancelled.
 #[tauri::command]
@@ -569,6 +578,7 @@ fn main() {
             builtin_icons,
             pick_icon,
             icon_image,
+            running_programs,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| dg_win::ui::show_error("DisplayGroups", &e.to_string()));

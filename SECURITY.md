@@ -24,6 +24,13 @@ This is here so you can judge the risk, and so reports can say which property th
   installer downloads the Microsoft WebView2 bootstrapper only if WebView2 is missing.
 - **Keyboard:** hotkeys use `RegisterHotKey`, which receives only the registered chords.
   DisplayGroups never installs keyboard hooks.
+- **Automatic switching** (only while a trigger is set up):
+  - The agent reads the names of running programs every 2 s, and window titles when a trigger
+    filters by title.
+  - It checks for game controllers after device changes.
+  - All of this stays in memory and is compared with your triggers. Nothing is stored or sent,
+    and only matches are logged.
+  - It never injects into or hooks other processes.
 - **Before/after actions**
   - Off by default.
   - Run as you, from the CLI or agent only.

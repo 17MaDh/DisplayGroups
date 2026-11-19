@@ -10,6 +10,7 @@
 pub mod agent;
 mod audio;
 pub mod confirm;
+pub mod detect;
 mod display;
 mod ffi;
 mod ffi_ui;

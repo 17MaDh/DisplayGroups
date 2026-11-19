@@ -1,18 +1,20 @@
-//! The resident agent, `displaygroupsw.exe agent` (ARCHITECTURE.md §7, §10, §11.3):
-//! global hotkeys, the OSD, live config reload and the disconnect fallback.
+//! The resident agent, `displaygroupsw.exe agent` (ARCHITECTURE.md §7, §10, §11.3,
+//! §15.1): global hotkeys, the OSD, live config reload, the disconnect fallback and
+//! automatic switching (triggers).
 //!
 //! The UI thread only handles window messages. Every switch runs on a worker thread
 //! that reuses the CLI's `apply`/`toggle`/`recover`, so the OSD keeps animating while
 //! Windows reconfigures the displays and the "Keep these settings?" box is open.
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use dg_engine::ccd::{Scope, TargetRef};
+use dg_engine::triggers::{Decision, Needs, Observation, Triggers};
 use dg_engine::{next_in_cycle, DisplayBackend, Engine};
 use dg_hotkey::Chord;
 use dg_model::{store, Config, Group, HotkeyAction, Theme};
-use dg_win::integration;
 use dg_win::osd::{Osd, OsdContent};
 use dg_win::system::{
     system_prefers_dark, trim_working_set, watch_dir, working_set_bytes, SingleInstance,
@@ -20,6 +22,7 @@ use dg_win::system::{
 use dg_win::tray::{classify, show_menu, MenuItem, Tray, TrayClick};
 use dg_win::window::{AgentEvent, AgentWindow};
 use dg_win::WinBackend;
+use dg_win::{detect, integration};
 use uuid::Uuid;
 
 use crate::commands::{self, hz, LastSwitch, Trigger};
@@ -32,10 +35,15 @@ const APP_JOB_DONE: u32 = 2;
 const TIMER_RELOAD: usize = 1;
 const TIMER_FALLBACK: usize = 2;
 const TIMER_MEMORY: usize = 3;
+/// Periodic check of running programs, while a program trigger exists.
+const TIMER_TRIGGERS: usize = 4;
+/// Controller check, debounced after device changes.
+const TIMER_CONTROLLER: usize = 5;
+const TRIGGER_POLL_MS: u32 = 2000;
+const CONTROLLER_DEBOUNCE_MS: u32 = 1000;
 /// Display events right after our own switch are its echo, not a disconnect.
 const OWN_SWITCH_GRACE: Duration = Duration::from_secs(10);
 const FALLBACK_COOLDOWN: Duration = Duration::from_secs(60);
-const DRY_RUN_DETAIL: &str = "Dry run: displays were not changed";
 
 #[derive(Debug, Clone)]
 enum Job {
@@ -43,6 +51,11 @@ enum Job {
     /// A group picked from the tray menu.
     Group(Uuid),
     Fallback(Uuid),
+    /// Automatic switching; `confirm` shows the countdown.
+    Trigger {
+        group: Uuid,
+        confirm: bool,
+    },
 }
 
 // Tray menu command ids.
@@ -77,6 +90,14 @@ struct Agent {
     known_active: Vec<TargetRef>,
     done: Arc<Mutex<Option<JobOutcome>>>,
     tray: Option<Tray>,
+    started: Instant,
+    triggers: Triggers,
+    /// What the enabled triggers need sampled.
+    needs: Needs,
+    /// Last result of the controller check.
+    controller: bool,
+    /// In a dry run, the group a trigger would have switched to (nothing really changes).
+    dry_current: Option<Uuid>,
 }
 
 pub(crate) fn run(ctx: &Ctx, cfg: Config, dry_run: bool, out: Output) -> Result<i32, CliError> {
@@ -109,6 +130,11 @@ pub(crate) fn run(ctx: &Ctx, cfg: Config, dry_run: bool, out: Output) -> Result<
         known_active: active_targets(),
         done: Arc::default(),
         tray: None,
+        started: Instant::now(),
+        triggers: Triggers::new(),
+        needs: Needs::default(),
+        controller: false,
+        dry_current: None,
     };
     agent.tray = match Tray::add(&window, &t("tray.tooltip")) {
         Ok(tray) => Some(tray),
@@ -118,6 +144,7 @@ pub(crate) fn run(ctx: &Ctx, cfg: Config, dry_run: bool, out: Output) -> Result<
         }
     };
     agent.register_hotkeys(&window);
+    agent.arm_triggers(&window);
     sync_lock_screen(&agent.cfg);
     if !agent.cfg.settings.start_minimized && !dry_run {
         open_settings();
@@ -125,7 +152,7 @@ pub(crate) fn run(ctx: &Ctx, cfg: Config, dry_run: bool, out: Output) -> Result<
     window.set_timer(TIMER_MEMORY, 5000);
     tracing::info!(dry_run, "agent started");
     out.line(if dry_run {
-        "Agent running (dry run: hotkeys only show the OSD). Close this window or press Ctrl+C to stop."
+        "Agent running (dry run: hotkeys and triggers only show the OSD). Close this window or press Ctrl+C to stop."
     } else {
         "Agent running. Close this window or press Ctrl+C to stop."
     });
@@ -189,6 +216,15 @@ impl Agent {
                 if fallback.enabled {
                     window.set_timer(TIMER_FALLBACK, fallback.debounce_ms.max(500));
                 }
+                if self.needs.controller {
+                    window.set_timer(TIMER_CONTROLLER, CONTROLLER_DEBOUNCE_MS);
+                }
+            }
+            AgentEvent::Timer(TIMER_TRIGGERS) => self.evaluate_triggers(window),
+            AgentEvent::Timer(TIMER_CONTROLLER) => {
+                window.kill_timer(TIMER_CONTROLLER);
+                self.controller = detect::controller_connected();
+                self.evaluate_triggers(window);
             }
             AgentEvent::Timer(TIMER_FALLBACK) => {
                 window.kill_timer(TIMER_FALLBACK);
@@ -209,6 +245,9 @@ impl Agent {
             AgentEvent::SessionUnlocked => {
                 self.locked = false;
                 // Lock-screen switches are reported by the service (pending the §8.5 spike).
+                if self.needs.controller {
+                    window.set_timer(TIMER_CONTROLLER, CONTROLLER_DEBOUNCE_MS);
+                }
             }
             _ => {}
         }
@@ -349,11 +388,85 @@ impl Agent {
                 }
                 self.cfg = loaded.config;
                 self.register_hotkeys(window);
+                self.arm_triggers(window);
                 sync_lock_screen(&self.cfg);
                 tracing::info!("config reloaded");
             }
             Err(e) => tracing::warn!("config not reloaded: {e}"),
         }
+    }
+
+    /// Starts or stops the trigger checks for the current config, and takes a first
+    /// look, which only primes the triggers (ARCHITECTURE.md §15.1).
+    fn arm_triggers(&mut self, window: &AgentWindow) {
+        self.needs = Triggers::needs(&self.cfg);
+        if self.needs.controller {
+            self.controller = detect::controller_connected();
+        }
+        if self.needs.programs {
+            window.set_timer(TIMER_TRIGGERS, TRIGGER_POLL_MS);
+        } else {
+            window.kill_timer(TIMER_TRIGGERS);
+        }
+        tracing::info!(
+            triggers = self.cfg.triggers.len(),
+            programs = self.needs.programs,
+            controller = self.needs.controller,
+            "triggers armed"
+        );
+        self.evaluate_triggers(window);
+    }
+
+    /// Samples what the enabled triggers watch and starts at most one switch.
+    fn evaluate_triggers(&mut self, window: &AgentWindow) {
+        let needs = self.needs;
+        if needs == Needs::default() || self.busy || self.locked {
+            return;
+        }
+        let obs = Observation {
+            programs: if needs.programs {
+                detect::running_program_names()
+            } else {
+                HashSet::new()
+            },
+            windows: if needs.windows {
+                detect::visible_windows()
+            } else {
+                Vec::new()
+            },
+            controller: self.controller,
+            now_ms: u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        };
+        let cfg = &self.cfg;
+        let dry = if self.dry_run { self.dry_current } else { None };
+        let mut current = || {
+            dry.or_else(|| {
+                let ids: Vec<Uuid> = cfg.groups.iter().map(|g| g.id).collect();
+                Engine::new(&WinBackend::new())
+                    .current_group(cfg, &ids)
+                    .ok()
+                    .flatten()
+            })
+        };
+        let Some(decision) = self.triggers.evaluate(cfg, &obs, &mut current) else {
+            return;
+        };
+        let confirm = cfg
+            .triggers
+            .iter()
+            .find(|t| t.id == decision.trigger())
+            .is_some_and(|t| t.confirm);
+        let group = decision.group();
+        match decision {
+            Decision::SwitchTo { .. } => tracing::info!(%group, "trigger started: switching"),
+            Decision::SwitchBack { .. } => {
+                tracing::info!(%group, "trigger ended: switching back")
+            }
+        }
+        if self.dry_run {
+            self.dry_current = Some(group);
+        }
+        self.start(Job::Trigger { group, confirm }, window);
     }
 
     fn start(&mut self, job: Job, window: &AgentWindow) {
@@ -507,6 +620,16 @@ fn execute(ctx: &Ctx, cfg: &Config, job: &Job, out: Output) -> Result<JobOutcome
                 out,
             )?;
         }
+        Job::Trigger { group, confirm } => {
+            commands::apply(
+                ctx,
+                cfg,
+                &group_by_id(cfg, *group)?,
+                !confirm,
+                Trigger::Auto,
+                out,
+            )?;
+        }
     }
     Ok(JobOutcome::Switched)
 }
@@ -531,9 +654,10 @@ fn open_settings() {
 /// What a hotkey *would* do, for `agent --dry-run`.
 fn preview(cfg: &Config, job: &Job) -> Result<JobOutcome, CliError> {
     let target = match job {
-        Job::Hotkey(HotkeyAction::Apply { group }) | Job::Group(group) | Job::Fallback(group) => {
-            Some(*group)
-        }
+        Job::Hotkey(HotkeyAction::Apply { group })
+        | Job::Group(group)
+        | Job::Fallback(group)
+        | Job::Trigger { group, .. } => Some(*group),
         Job::Hotkey(HotkeyAction::Toggle { groups } | HotkeyAction::Cycle { groups }) => {
             let display = WinBackend::new();
             let current = Engine::new(&display).current_group(cfg, groups)?;
@@ -544,12 +668,12 @@ fn preview(cfg: &Config, job: &Job) -> Result<JobOutcome, CliError> {
     Ok(match target.and_then(|id| cfg.group_by_id(id)) {
         Some(g) => JobOutcome::Preview {
             title: g.name.clone(),
-            detail: DRY_RUN_DETAIL.into(),
+            detail: t("osd.dryRun"),
             icon: g.icon.clone(),
         },
         None => JobOutcome::Preview {
-            title: "Recover".into(),
-            detail: DRY_RUN_DETAIL.into(),
+            title: t("tray.recover"),
+            detail: t("osd.dryRun"),
             icon: "builtin:monitor".into(),
         },
     })
@@ -558,7 +682,7 @@ fn preview(cfg: &Config, job: &Job) -> Result<JobOutcome, CliError> {
 fn group_by_id(cfg: &Config, id: Uuid) -> Result<Group, CliError> {
     cfg.group_by_id(id).cloned().ok_or_else(|| {
         CliError::Config(format!(
-            "the hotkey points at a group that no longer exists ({id})"
+            "a hotkey or trigger points at a group that no longer exists ({id})"
         ))
     })
 }

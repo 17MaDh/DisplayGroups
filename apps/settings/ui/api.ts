@@ -63,6 +63,22 @@ export interface Hotkey {
   [extra: string]: unknown;
 }
 
+export type TriggerWhen =
+  | { type: "program"; names: string[]; windowTitle?: string | null }
+  | { type: "controller" };
+
+/** Automatic switching (ARCHITECTURE.md §15.1). */
+export interface Trigger {
+  id: string;
+  enabled: boolean;
+  when: TriggerWhen;
+  group: string;
+  switchBack: boolean;
+  revertDelayMs: number;
+  confirm: boolean;
+  [extra: string]: unknown;
+}
+
 export interface Settings {
   theme: Theme;
   language: string;
@@ -80,6 +96,7 @@ export interface Config {
   monitors: Record<string, MonitorEntry>;
   groups: Group[];
   hotkeys: Hotkey[];
+  triggers: Trigger[];
   settings: Settings;
   [extra: string]: unknown;
 }
@@ -173,6 +190,8 @@ export const api = {
   pickIcon: (title: string, filter: string) => invoke<string | null>("pick_icon", { title, filter }),
   /** A custom (`file:`) icon as a data: URL. */
   iconImage: (icon: string) => invoke<string>("icon_image", { icon }),
+  /** Programs with a window open now (lower-case .exe names), for triggers. */
+  runningPrograms: () => invoke<string[]>("running_programs"),
 };
 
 export const SCALE_STEPS = [100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500];

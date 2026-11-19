@@ -2,7 +2,7 @@
 
 import { api, type Config, type Issue, type Platform, type Status } from "./api";
 
-export type Page = "groups" | "hotkeys" | "shortcuts" | "settings" | "diagnostics";
+export type Page = "groups" | "hotkeys" | "triggers" | "shortcuts" | "settings" | "diagnostics";
 
 export const state = {
   config: null as unknown as Config,

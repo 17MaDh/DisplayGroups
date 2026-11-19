@@ -597,6 +597,18 @@ button.btn.icon-only[aria-pressed="true"] {
   margin-block-start: 12px;
 }
 
+.inspector .wide {
+  grid-column: span 2;
+}
+
+.card.trigger {
+  margin-block-end: 12px;
+}
+
+.card.trigger.disabled > :not(:first-child) {
+  opacity: 0.6;
+}
+
 .display-tabs {
   display: flex;
   gap: 4px;
