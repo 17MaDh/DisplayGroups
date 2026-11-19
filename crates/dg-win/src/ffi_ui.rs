@@ -148,6 +148,34 @@ pub const DBT_DEVICEREMOVECOMPLETE: usize = 0x8004;
 pub const DBT_DEVTYP_DEVICEINTERFACE: u32 = 5;
 pub const DEVICE_NOTIFY_WINDOW_HANDLE: u32 = 0;
 
+// Input
+pub const WM_KEYDOWN: u32 = 0x0100;
+pub const WM_COMMAND: u32 = 0x0111;
+pub const WM_MOUSEMOVE: u32 = 0x0200;
+pub const WM_LBUTTONUP: u32 = 0x0202;
+pub const WM_RBUTTONUP: u32 = 0x0205;
+pub const WM_CONTEXTMENU: u32 = 0x007B;
+pub const VK_TAB: u32 = 0x09;
+pub const VK_RETURN: u32 = 0x0D;
+pub const VK_ESCAPE: u32 = 0x1B;
+pub const VK_SPACE: u32 = 0x20;
+pub const VK_LEFT: u32 = 0x25;
+pub const VK_RIGHT: u32 = 0x27;
+pub const CS_DROPSHADOW: u32 = 0x0002_0000;
+pub const SW_SHOW: i32 = 5;
+pub const IDC_ARROW: *const u16 = 32512 as *const u16;
+pub const DT_WORDBREAK: u32 = 0x0010;
+
+// Menus
+pub const MF_STRING: u32 = 0x0000;
+pub const MF_CHECKED: u32 = 0x0008;
+pub const MF_GRAYED: u32 = 0x0001;
+pub const MF_SEPARATOR: u32 = 0x0800;
+pub const MF_POPUP: u32 = 0x0010;
+pub const TPM_RIGHTBUTTON: u32 = 0x0002;
+pub const TPM_RETURNCMD: u32 = 0x0100;
+pub const TPM_NONOTIFY: u32 = 0x0080;
+
 // Window styles
 pub const WS_POPUP: u32 = 0x8000_0000;
 pub const WS_EX_TOPMOST: u32 = 0x0000_0008;
@@ -193,6 +221,21 @@ pub const RRF_RT_REG_DWORD: u32 = 0x0000_0010;
 
 #[link(name = "user32")]
 extern "system" {
+    pub fn LoadCursorW(instance: HANDLE, name: *const u16) -> HANDLE;
+    pub fn SetForegroundWindow(hwnd: HWND) -> i32;
+    pub fn CreatePopupMenu() -> HANDLE;
+    pub fn AppendMenuW(menu: HANDLE, flags: u32, id: usize, text: *const u16) -> i32;
+    pub fn TrackPopupMenu(
+        menu: HANDLE,
+        flags: u32,
+        x: i32,
+        y: i32,
+        reserved: i32,
+        hwnd: HWND,
+        rect: *const RECT,
+    ) -> i32;
+    pub fn DestroyMenu(menu: HANDLE) -> i32;
+    pub fn GetCursorPos(point: *mut POINT) -> i32;
     pub fn RegisterClassExW(class: *const WNDCLASSEXW) -> u16;
     pub fn CreateWindowExW(
         ex_style: u32,
@@ -246,6 +289,8 @@ extern "system" {
 
 #[link(name = "gdi32")]
 extern "system" {
+    pub fn CreatePen(style: i32, width: i32, color: u32) -> HANDLE;
+    pub fn RoundRect(hdc: HANDLE, l: i32, t: i32, r: i32, b: i32, w: i32, h: i32) -> i32;
     pub fn CreateSolidBrush(color: u32) -> HANDLE;
     pub fn DeleteObject(obj: HANDLE) -> i32;
     pub fn CreateFontW(

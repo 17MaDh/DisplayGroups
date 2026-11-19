@@ -1,0 +1,29 @@
+[package]
+name = "displaygroups-settings"
+description = "DisplayGroups settings app (Tauri v2); runs only while open"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+# Serve the built UI (../dist) from inside the executable instead of the Vite dev server.
+# The Tauri CLI turns this on for `tauri build`.
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+dg-model.workspace = true
+dg-identity.workspace = true
+dg-hotkey.workspace = true
+dg-engine.workspace = true
+dg-win.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

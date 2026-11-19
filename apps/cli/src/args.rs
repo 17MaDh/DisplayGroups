@@ -1,6 +1,13 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Toggle {
+    On,
+    Off,
+    Status,
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -56,6 +63,29 @@ pub enum Command {
     },
     /// Handle a displaygroups:// link (used by the protocol handler).
     Uri { url: String },
+    /// Create a Desktop and/or Start Menu shortcut that switches to a group.
+    Shortcut {
+        group: String,
+        /// On the Desktop (the default when no place is given).
+        #[arg(long)]
+        desktop: bool,
+        /// In Start Menu\Programs\DisplayGroups, ready to pin.
+        #[arg(long)]
+        start_menu: bool,
+        /// builtin:monitor|couch|dual|gaming|work, or a .ico/.png file (saved on the group).
+        #[arg(long)]
+        icon: Option<String>,
+    },
+    /// Start the agent when you sign in to Windows.
+    Startup {
+        #[arg(value_enum)]
+        state: Toggle,
+    },
+    /// Handle displaygroups:// links (this user only).
+    Protocol {
+        #[arg(value_enum)]
+        state: Toggle,
+    },
     /// Run the background agent: hotkeys, on-screen display, disconnect fallback.
     /// Normally started with Windows through displaygroupsw.exe.
     Agent {

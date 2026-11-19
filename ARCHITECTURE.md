@@ -20,6 +20,61 @@
 >   - live reload, single instance and clean shutdown.
 > - **Waiting on the §8.5 spike result:** the lock-screen service and broker.
 >
+> **Phase 4a (native parts) done**, 95 automated tests:
+> - **Tray icon and menu:**
+>   - Contents: groups with the current one checked, Recover, Settings…, Start with Windows,
+>     Start minimized and Exit.
+>   - It is re-added when Explorer restarts.
+> - **"Keep these display settings?" countdown dialog:**
+>   - An owner-painted Win32 window that follows the theme and works from the keyboard.
+>   - Revert has the initial focus.
+>   - It replaces the message box.
+> - **Built-in icons** are generated at run time from Segoe Fluent Icons glyphs as multi-size
+>   `.ico` files; custom `.ico`/`.png` can be imported.
+> - **`shortcut` command:** `IShellLinkW` with known-folder paths for the Desktop and
+>   `Start Menu\Programs\DisplayGroups`.
+> - **`startup` and `protocol` commands:** both write to HKCU only.
+> - **Application manifest** embedded in both binaries: common controls v6, PerMonitorV2, UTF-8.
+> - **`locales/en.json`:** shared UI strings for the native parts and the settings app.
+>
+> Checked on the test machine, displays unchanged:
+> - The dialog and the OSD were captured in dark and light themes and reviewed.
+> - Icons were reviewed at 16–256 px.
+> - Shortcuts with Arabic names were written to a temporary folder.
+> - The tray icon was registered. A simulated right-click reached the menu code, but a menu
+>   only appears for a real click, because Explorer grants foreground rights only then.
+>
+> **Phase 4b (settings app) done:** `apps/settings`, Tauri v2 + TypeScript + Vite, ~50 KB of JS.
+> - **Groups:**
+>   - List with drag reorder, duplicate, and delete with undo.
+>   - Editor with the 2D canvas: drag with 8 px edge snapping, primary kept at (0,0), overlaps refused.
+>   - Per-display settings. Resolution and refresh pickers come from the modes the monitor
+>     really offers when it is on.
+>   - Sound, actions, capture, validate and test.
+> - **Hotkeys:** recording and a live availability check against other programs.
+> - **Other pages:** Shortcuts, Settings and Diagnostics (with import/export).
+> - **Theme:** System/Dark/Light, kept in step with the native title bar and Mica.
+> - **Start, motion and text:**
+>   - No white flash on start (hidden window, then fade-in).
+>   - Animations use only transform/opacity and respect reduced motion.
+>   - All strings come from `locales/en.json`, with RTL-safe CSS.
+> - **How it works:**
+>   - Config editing, validation, display status and modes, and the hotkey probe run in-process.
+>   - Capture, validate, shortcut, startup, protocol and test-apply run the CLI next to the app,
+>     so there is one implementation.
+> - **Checked on the test machine, displays unchanged:**
+>   - Each page was captured and reviewed in dark and light.
+>   - The TV's real modes (3840×2160 at 120 Hz) appeared as pickers.
+>   - The hotkey check correctly reported `Ctrl+Alt+F12` as held by another program.
+>   - "Discard" restores the theme.
+>   - Closing the window ends the process and all its WebView2 processes.
+> - **Design change:** the UI uses hand-written Fluent-style CSS instead of Fluent UI Web
+>   Components. It is lighter, has no runtime UI dependency, and gives full control over RTL.
+> - **Not done yet:**
+>   - "Identify" (numbers on each screen).
+>   - Picking a custom icon file from the UI (the CLI's `shortcut --icon` supports it).
+>   - Translations beyond English.
+>
 > Items marked **[VERIFIED]** were observed on real hardware (Windows 11 26H2 build 26300, RTX 5080,
 > ASUS XG32UCWMG + DFI27280 + Samsung 65" TV over HDMI) while building the PowerShell prototype this
 > project replaces. Items marked **[SPIKE]** are unproven and get a go/no-go test before code depends on them.
@@ -416,6 +471,8 @@ Tool: `tools/lockscreen-spike`; steps in `docs/lockscreen-spike.md`. The broker 
 
 ## 9. Settings UI (Phase 4)
 
+- **Stack as built:** TypeScript + Vite with hand-written Fluent-style CSS (decided in Phase 4b
+  instead of Fluent UI Web Components).
 - **Pages:** Groups, Group editor, Hotkeys, Shortcuts, Settings, Diagnostics.
 - **Groups list:** create, rename, reorder (drag), delete with undo, and **Duplicate**. Duplicate
   deep-copies the group under a new id named "<name> (copy)". Hotkeys and shortcuts are not copied.

@@ -8,6 +8,7 @@ members = [
     "crates/dg-engine",
     "crates/dg-win",
     "apps/cli",
+    "apps/settings/src-tauri",
     "tools/lockscreen-spike",
 ]
 

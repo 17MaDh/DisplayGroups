@@ -9,12 +9,16 @@
 
 pub mod agent;
 mod audio;
+pub mod confirm;
 mod display;
 mod ffi;
 mod ffi_ui;
+pub mod icons;
+pub mod integration;
 pub mod osd;
 pub mod shell;
 pub mod system;
+pub mod tray;
 pub mod ui;
 mod util;
 pub mod window;

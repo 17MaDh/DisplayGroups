@@ -25,6 +25,10 @@ pub enum AgentEvent {
     SessionUnlocked,
     /// Another DisplayGroups process switched groups (see `agent::notify_switched`).
     Switched,
+    /// Mouse/keyboard event on the tray icon (see [`crate::tray::classify`]).
+    Tray(u32),
+    /// Explorer restarted; the tray icon must be added again.
+    TaskbarCreated,
     /// A message posted through [`Poster`].
     App {
         code: u32,
@@ -35,6 +39,7 @@ pub enum AgentEvent {
 thread_local! {
     static QUEUE: RefCell<VecDeque<AgentEvent>> = const { RefCell::new(VecDeque::new()) };
     static SWITCHED_ID: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    static TASKBAR_CREATED_ID: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 /// Posts [`AgentEvent::App`] messages to the agent window from any thread.
@@ -96,6 +101,8 @@ impl AgentWindow {
             }
             let name = wide(SWITCHED_MESSAGE);
             SWITCHED_ID.with(|c| c.set(RegisterWindowMessageW(name.as_ptr())));
+            let taskbar = wide("TaskbarCreated");
+            TASKBAR_CREATED_ID.with(|c| c.set(RegisterWindowMessageW(taskbar.as_ptr())));
             WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION);
             let filter = DEV_BROADCAST_DEVICEINTERFACE_W {
                 dbcc_size: std::mem::size_of::<DEV_BROADCAST_DEVICEINTERFACE_W>() as u32,
@@ -114,6 +121,10 @@ impl AgentWindow {
                 device_notification,
             })
         }
+    }
+
+    pub(crate) fn hwnd(&self) -> HWND {
+        self.hwnd
     }
 
     pub fn poster(&self) -> Poster {
@@ -207,11 +218,18 @@ unsafe extern "system" fn agent_proc(hwnd: HWND, msg: u32, wparam: usize, lparam
             WTS_SESSION_UNLOCK => push(AgentEvent::SessionUnlocked),
             _ => {}
         },
+        m if m == WM_APP + crate::tray::TRAY_CODE => {
+            // NOTIFYICON_VERSION_4: the low word of lParam is the mouse/keyboard event.
+            push(AgentEvent::Tray((lparam & 0xFFFF) as u32))
+        }
         m if (WM_APP..WM_APP + 0x1000).contains(&m) => push(AgentEvent::App {
             code: m - WM_APP,
             data: wparam,
         }),
         m if m != 0 && m == SWITCHED_ID.with(|c| c.get()) => push(AgentEvent::Switched),
+        m if m != 0 && m == TASKBAR_CREATED_ID.with(|c| c.get()) => {
+            push(AgentEvent::TaskbarCreated)
+        }
         WM_CLOSE => {
             // SAFETY: ends the message loop of this thread.
             unsafe { PostQuitMessage(0) };

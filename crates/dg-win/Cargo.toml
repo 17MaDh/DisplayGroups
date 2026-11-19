@@ -11,6 +11,9 @@ dg-engine.workspace = true
 dg-identity.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+dg-engine.workspace = true
+
 [dependencies.windows]
 workspace = true
 features = [
@@ -21,6 +24,7 @@ features = [
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Variant",
+    "Win32_UI_Shell",
     "Win32_UI_Shell_PropertiesSystem",
 ]
 

@@ -99,6 +99,36 @@ pub fn system_prefers_dark() -> bool {
     r == 0 && data == 0
 }
 
+/// Windows build number (e.g. 26300), or 0 if it cannot be read.
+pub fn windows_build() -> u32 {
+    const HKEY_LOCAL_MACHINE: isize = 0x8000_0002_u32 as i32 as isize;
+    const RRF_RT_REG_SZ: u32 = 0x2;
+    let key = wide(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+    let value = wide("CurrentBuildNumber");
+    let mut buf = [0u16; 32];
+    let mut size = (buf.len() * 2) as u32;
+    // SAFETY: reads a short string into a fixed buffer of `size` bytes.
+    let r = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            null_mut(),
+            buf.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if r != 0 {
+        return 0;
+    }
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(&buf[..end])
+        .trim()
+        .parse()
+        .unwrap_or(0)
+}
+
 /// True when no other process holds the global hotkey. (Our own registrations also
 /// count as taken.)
 pub fn hotkey_is_free(modifiers: u32, vk: u32) -> bool {

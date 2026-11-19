@@ -6,8 +6,12 @@ exactly which displays are on, the primary, resolution, refresh rate, position, 
 scale, and optionally the audio output and volume.
 
 > **Status: pre-alpha.**
-> - **Done:** the switching engine and command line (Phase 2), and the background agent with
->   hotkeys and an on-screen display (Phase 3).
+> - **Done:**
+>   - the switching engine and command line (Phase 2);
+>   - the background agent with hotkeys and an on-screen display (Phase 3);
+>   - the tray menu, the "Keep these display settings?" countdown, and shortcut and startup
+>     integration (Phase 4a);
+>   - the settings app with the drag-and-drop layout editor (Phase 4b).
 > - **Waiting on a feasibility test:** lock-screen support (see
 >   [docs/lockscreen-spike.md](docs/lockscreen-spike.md)).
 > - **Next:** the tray, the settings app and the installer.
@@ -25,6 +29,9 @@ scale, and optionally the audio output and volume.
 | `displaygroups list` / `status` | Shows groups and monitors / what is on screen |
 | `displaygroups duplicate "Desktop"` | Copies a group |
 | `displaygroups recover [--extend]` | Restores the last layout that worked (or extends all displays) |
+| `displaygroups shortcut "Gaming on Couch" [--desktop] [--start-menu] [--icon builtin:couch]` | Creates a shortcut that switches to the group. Built-in icons: `monitor`, `couch`, `dual`, `gaming`, `work`; or give a `.ico`/`.png` file |
+| `displaygroups startup on\|off\|status` | Starts the agent when you sign in (current user only) |
+| `displaygroups protocol on\|off\|status` | Handles `displaygroups://apply/<id>` and `displaygroups://toggle/<id>,<id>` links (current user only) |
 | `displaygroupsw agent [--dry-run]` | Runs in the background: registers the hotkeys in `config.json`, shows the on-screen display after a switch, and reloads the config when it changes. `--dry-run` only shows what a hotkey would do |
 
 Hotkeys are entries in `config.json`. Example:
@@ -65,12 +72,19 @@ Requirements:
 - [rustup](https://rustup.rs) (stable, MSVC).
 - Visual Studio Build Tools with the "Desktop development with C++" workload.
 
+The settings app also needs [Node.js](https://nodejs.org) LTS.
+
 ```powershell
+cd apps\settings; npm ci; npm run build; cd ..\..   # the UI that gets embedded
 cargo test --workspace
-cargo build --release
+cargo build --release --features displaygroups-settings/custom-protocol
 ```
 
-The binaries are `target\release\displaygroups.exe` and `displaygroupsw.exe`.
+The binaries in `target\release` are:
+- `displaygroups.exe` and `displaygroupsw.exe`: the CLI, with and without a console window.
+- `displaygroups-settings.exe`: the settings app.
+
+To work on the UI with live reload, run `npm run tauri dev` in `apps\settings`.
 
 ### Smart App Control
 

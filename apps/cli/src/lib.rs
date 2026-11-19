@@ -3,6 +3,8 @@
 mod agent;
 mod args;
 mod commands;
+mod i18n;
+mod integrate;
 mod logging;
 mod output;
 pub mod uri;
@@ -71,6 +73,7 @@ pub fn main_entry(console: bool) -> i32 {
     let out = Output {
         console,
         json: cli.json,
+        dark: false,
     };
     match run(cli, out) {
         Ok(code) => code,
@@ -78,6 +81,15 @@ pub fn main_entry(console: bool) -> i32 {
             out.error(e.to_string());
             e.exit_code()
         }
+    }
+}
+
+/// Resolves the theme setting for native UI.
+pub(crate) fn prefers_dark(theme: dg_model::Theme) -> bool {
+    match theme {
+        dg_model::Theme::Dark => true,
+        dg_model::Theme::Light => false,
+        dg_model::Theme::System => dg_win::system::system_prefers_dark(),
     }
 }
 
@@ -99,6 +111,12 @@ fn run(cli: Cli, out: Output) -> Result<i32, CliError> {
         .unwrap_or("info");
     let _log_guard = logging::init(&ctx.paths.logs_dir, level);
     let loaded = loaded?;
+    let settings = &loaded.config.settings;
+    i18n::init(&settings.language);
+    let out = Output {
+        dark: prefers_dark(settings.theme),
+        ..out
+    };
     tracing::info!(command = ?cli.command, config = %ctx.config_path.display(), "start");
     if let Some(from) = loaded.migrated_from {
         out.warn(format!(

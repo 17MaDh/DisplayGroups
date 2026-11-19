@@ -12,6 +12,8 @@ use serde::Serialize;
 pub struct Output {
     pub console: bool,
     pub json: bool,
+    /// Dark theme for native dialogs (resolved from the config's theme setting).
+    pub dark: bool,
 }
 
 impl Output {
@@ -46,13 +48,20 @@ impl Output {
         }
     }
 
-    /// Terminal prompt when a person is at the console; a message box otherwise
-    /// (shortcuts, scripts with redirected input).
+    /// Terminal prompt when a person is at the console; the countdown dialog otherwise
+    /// (shortcuts, hotkeys, scripts with redirected input).
     pub fn confirmer(&self) -> Box<dyn Confirmer> {
         if self.console && std::io::stdin().is_terminal() {
             Box::new(ConsoleConfirmer)
         } else {
-            Box::new(dg_win::ui::MessageBoxConfirmer)
+            use crate::i18n::t;
+            Box::new(dg_win::confirm::CountdownDialog {
+                title: t("confirm.title"),
+                body: t("confirm.body"),
+                keep: t("confirm.keep"),
+                revert: t("confirm.revert"),
+                dark: self.dark,
+            })
         }
     }
 }

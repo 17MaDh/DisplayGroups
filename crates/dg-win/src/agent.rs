@@ -13,6 +13,13 @@ pub const SWITCHED_MESSAGE: &str = "DisplayGroups.Switched";
 /// Name of the agent's single-instance mutex.
 pub const AGENT_MUTEX: &str = "Local\\DisplayGroups.Agent";
 
+/// True when a DisplayGroups agent is running in this session.
+pub fn is_running() -> bool {
+    let class = wide(AGENT_WINDOW_CLASS);
+    // SAFETY: lookup with a NUL-terminated class name.
+    unsafe { !FindWindowExW(null_mut(), null_mut(), class.as_ptr(), null()).is_null() }
+}
+
 /// Returns false when no agent is running (then there is simply no OSD).
 pub fn notify_switched() -> bool {
     let class = wide(AGENT_WINDOW_CLASS);

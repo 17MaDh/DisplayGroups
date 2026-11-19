@@ -22,6 +22,7 @@ pub(crate) enum Trigger {
     Cli,
     Uri,
     Hotkey,
+    Tray,
     Fallback,
 }
 
@@ -49,6 +50,22 @@ pub(crate) fn dispatch(
         Command::Duplicate { group } => duplicate(ctx, &mut cfg, &group, out),
         Command::Recover { extend } => recover(ctx, extend, out),
         Command::Uri { url } => handle_uri(ctx, &cfg, &url, out),
+        Command::Shortcut {
+            group,
+            desktop,
+            start_menu,
+            icon,
+        } => crate::integrate::shortcut(
+            ctx,
+            &mut cfg,
+            &group,
+            desktop,
+            start_menu,
+            icon.as_deref(),
+            out,
+        ),
+        Command::Startup { state } => crate::integrate::startup(state, out),
+        Command::Protocol { state } => crate::integrate::protocol(state, out),
         Command::Agent { dry_run } => crate::agent::run(ctx, cfg, dry_run, out),
     }
 }
