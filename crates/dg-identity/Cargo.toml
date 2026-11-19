@@ -1,0 +1,15 @@
+[package]
+name = "dg-identity"
+description = "EDID parsing and stable monitor matching for DisplayGroups"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+dg-model.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

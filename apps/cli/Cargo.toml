@@ -1,0 +1,35 @@
+[package]
+name = "displaygroups"
+description = "DisplayGroups command line: displaygroups.exe (console) and displaygroupsw.exe (no console)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "dg_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "displaygroups"
+path = "src/bin/displaygroups.rs"
+
+[[bin]]
+name = "displaygroupsw"
+path = "src/bin/displaygroupsw.rs"
+
+[dependencies]
+dg-model.workspace = true
+dg-engine.workspace = true
+dg-win.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+
+[lints]
+workspace = true

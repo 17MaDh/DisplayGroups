@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dg-model",
+    "crates/dg-identity",
+    "crates/dg-engine",
+    "crates/dg-win",
+    "apps/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["DisplayGroups contributors"]
+
+[workspace.dependencies]
+dg-model = { path = "crates/dg-model" }
+dg-identity = { path = "crates/dg-identity" }
+dg-engine = { path = "crates/dg-engine" }
+dg-win = { path = "crates/dg-win" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+clap = { version = "4.5", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+windows = "0.61"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,23 @@
+[package]
+name = "dg-engine"
+description = "DisplayGroups switching engine (SetDisplayConfig strategy ladder) over a backend trait"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+# Exposes the in-memory `fake` backend outside this crate's tests.
+fake = []
+
+[dependencies]
+dg-model.workspace = true
+dg-identity.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

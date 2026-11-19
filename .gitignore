@@ -1,0 +1,20 @@
+# Rust build output
+/target/
+
+# Portable-mode data written next to the binaries
+/data/
+
+# Settings UI (Phase 4)
+node_modules/
+apps/settings/ui/dist/
+
+# Editors and OS
+.vs/
+.vscode/
+.idea/
+*.user
+Thumbs.db
+.DS_Store
+
+# Atomic-save leftovers
+*.tmp-*
