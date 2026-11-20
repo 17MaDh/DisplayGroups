@@ -15,6 +15,7 @@
   "tray.recover": "استعادة آخر تخطيط كان يعمل",
   "tray.settings": "الإعدادات…",
   "tray.startWithWindows": "التشغيل مع Windows",
+  "tray.startAtLogin": "التشغيل عند تسجيل الدخول",
   "tray.startMinimized": "التشغيل مصغرًا",
   "tray.exit": "خروج",
   "tray.settingsMissing": "تطبيق الإعدادات غير موجود في هذا الإصدار.",

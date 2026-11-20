@@ -18,6 +18,7 @@ uuid.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
 
 [lints]
 workspace = true

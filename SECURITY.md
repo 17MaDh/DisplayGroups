@@ -43,6 +43,15 @@ This is here so you can judge the risk, and so reports can say which property th
     - checks the caller's session and SID;
     - limits messages to 64 KB.
   - The service never receives or runs actions. ARCHITECTURE.md §8 has the details.
+- **Linux (preview, GNOME):**
+  - Everything runs as you. DisplayGroups writes only in your home folder:
+    - `~/.config/displaygroups` and `~/.local/state/displaygroups`;
+    - `.desktop` files for autostart, links and launchers, plus one line in
+      `~/.config/mimeapps.list`;
+    - GNOME custom shortcuts named "DisplayGroups: …".
+  - Displays are changed through GNOME's own display service on the session bus.
+  - Automatic switching reads process names from `/proc` and checks `/sys` for game
+    controllers. Nothing is stored or sent.
 - **Downloads:** every release lists SHA-256 checksums. Signed releases are signed through the
   SignPath Foundation programme ([docs/releasing.md](docs/releasing.md)).
 

@@ -216,6 +216,66 @@ impl fmt::Display for Chord {
     }
 }
 
+impl Chord {
+    /// The chord as a GTK accelerator for GNOME's custom shortcuts, e.g.
+    /// `<Control><Alt>F12` (ARCHITECTURE.md §16.3, L2). `None` for a key GNOME has no
+    /// name for.
+    pub fn gtk_accelerator(&self) -> Option<String> {
+        let key = match self.vk {
+            0x30..=0x39 => char::from_u32(self.vk)?.to_string(),
+            0x41..=0x5A => char::from_u32(self.vk)?.to_ascii_lowercase().to_string(),
+            0x60..=0x69 => format!("KP_{}", self.vk - 0x60),
+            0x70..=0x87 => format!("F{}", self.vk - 0x70 + 1),
+            vk => match key_name(vk).as_str() {
+                "Backspace" => "BackSpace",
+                "Tab" => "Tab",
+                "Enter" => "Return",
+                "Pause" => "Pause",
+                "Esc" => "Escape",
+                "Space" => "space",
+                "PageUp" => "Page_Up",
+                "PageDown" => "Page_Down",
+                "End" => "End",
+                "Home" => "Home",
+                "Left" => "Left",
+                "Up" => "Up",
+                "Right" => "Right",
+                "Down" => "Down",
+                "PrintScreen" => "Print",
+                "Insert" => "Insert",
+                "Delete" => "Delete",
+                "ScrollLock" => "Scroll_Lock",
+                "Semicolon" => "semicolon",
+                "Equals" => "equal",
+                "Comma" => "comma",
+                "Minus" => "minus",
+                "Period" => "period",
+                "Slash" => "slash",
+                "Backquote" => "grave",
+                "LeftBracket" => "bracketleft",
+                "Backslash" => "backslash",
+                "RightBracket" => "bracketright",
+                "Quote" => "apostrophe",
+                _ => return None,
+            }
+            .to_string(),
+        };
+        let mut out = String::new();
+        for (m, name) in [
+            (Modifiers::CTRL, "<Control>"),
+            (Modifiers::ALT, "<Alt>"),
+            (Modifiers::SHIFT, "<Shift>"),
+            (Modifiers::WIN, "<Super>"),
+        ] {
+            if self.modifiers.contains(m) {
+                out.push_str(name);
+            }
+        }
+        out.push_str(&key);
+        Some(out)
+    }
+}
+
 const RESERVED: &[(&str, &str)] = &[
     ("Ctrl+Alt+Delete", "Windows security screen"),
     ("Ctrl+Shift+Esc", "Task Manager"),
@@ -247,6 +307,24 @@ const KNOWN_DEFAULTS: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gtk_accelerators_use_gnome_key_names() {
+        let accel = |s: &str| Chord::parse(s).unwrap().gtk_accelerator();
+        assert_eq!(accel("Ctrl+Alt+F12").as_deref(), Some("<Control><Alt>F12"));
+        assert_eq!(accel("Win+Shift+T").as_deref(), Some("<Shift><Super>t"));
+        assert_eq!(
+            accel("Ctrl+Alt+PageUp").as_deref(),
+            Some("<Control><Alt>Page_Up")
+        );
+        assert_eq!(accel("Alt+Numpad5").as_deref(), Some("<Alt>KP_5"));
+        assert_eq!(accel("Ctrl+1").as_deref(), Some("<Control>1"));
+        assert_eq!(
+            accel("Ctrl+Alt+Quote").as_deref(),
+            Some("<Control><Alt>apostrophe")
+        );
+        assert_eq!(accel("F13").as_deref(), Some("F13"));
+    }
 
     #[test]
     fn parses_and_prints_canonically() {

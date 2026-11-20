@@ -7,14 +7,17 @@
 //! or a countdown of 0) it is "temporary": applied at once, and GNOME's remembered
 //! layout comes back at the next sign-in or display hot-plug.
 
+use std::path::{Path, PathBuf};
+
 use dg_engine::{next_in_cycle, PrimaryInfo};
 use dg_gnome::dbus::{Method, Mutter};
+use dg_gnome::desktop::{self, Dirs};
 use dg_gnome::{ApplyConfig, DisplayState};
 use dg_model::{store, Config, Group};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::args::Command;
+use crate::args::{Command, Toggle};
 use crate::common::{
     duplicate, ensure_valid, handle_uri, run_actions, warn_issues, write_last_switch,
 };
@@ -68,12 +71,180 @@ pub(crate) fn dispatch(
         Command::Duplicate { group } => duplicate(ctx, &mut cfg, &group, out),
         Command::Recover { extend } => recover(ctx, extend, out),
         Command::Uri { url } => handle_uri(ctx, &cfg, &url, out),
+        // On GNOME, labels on each screen need the settings app's windows (phase L3).
         Command::Identify { .. } => not_yet("identify"),
-        Command::Shortcut { .. } => not_yet("shortcut"),
-        Command::Startup { .. } => not_yet("startup"),
-        Command::Protocol { .. } => not_yet("protocol"),
-        Command::Agent { .. } => not_yet("agent"),
+        Command::Shortcut {
+            group,
+            desktop,
+            start_menu,
+            icon,
+        } => shortcut(
+            ctx,
+            &mut cfg,
+            &group,
+            desktop,
+            start_menu,
+            icon.as_deref(),
+            out,
+        ),
+        Command::Startup { state } => startup(state, out),
+        Command::Protocol { state } => protocol(state, out),
+        Command::Agent { dry_run } => crate::linux_agent::run(ctx, cfg, dry_run, out),
     }
+}
+
+/// This program's path, for desktop entries and GNOME shortcuts. An AppImage runs from
+/// a temporary mount, so its own file (`$APPIMAGE`) is what must be launched.
+pub(crate) fn self_exe() -> Result<PathBuf, CliError> {
+    if let Some(appimage) = std::env::var_os("APPIMAGE").filter(|v| !v.is_empty()) {
+        return Ok(PathBuf::from(appimage));
+    }
+    std::env::current_exe().map_err(|e| CliError::Config(e.to_string()))
+}
+
+fn dirs() -> Result<Dirs, CliError> {
+    Dirs::from_env().ok_or_else(|| CliError::Config("HOME is not set".into()))
+}
+
+fn startup(state: Toggle, out: Output) -> Result<i32, CliError> {
+    let dirs = dirs()?;
+    match state {
+        Toggle::On => {
+            desktop::set_autostart(&dirs, Some(&self_exe()?)).map_err(CliError::Config)?;
+            out.line("The agent will start when you log in.");
+        }
+        Toggle::Off => {
+            desktop::set_autostart(&dirs, None).map_err(CliError::Config)?;
+            out.line("The agent will no longer start when you log in.");
+        }
+        Toggle::Status => out.line(if desktop::autostart_enabled(&dirs) {
+            "Start at login: on"
+        } else {
+            "Start at login: off"
+        }),
+    }
+    Ok(EXIT_OK)
+}
+
+fn protocol(state: Toggle, out: Output) -> Result<i32, CliError> {
+    let dirs = dirs()?;
+    match state {
+        Toggle::On => {
+            desktop::register_scheme(&dirs, &self_exe()?).map_err(CliError::Config)?;
+            out.line("displaygroups:// links now open DisplayGroups (this user only).");
+        }
+        Toggle::Off => {
+            desktop::unregister_scheme(&dirs).map_err(CliError::Config)?;
+            out.line("displaygroups:// links are no longer handled.");
+        }
+        Toggle::Status => match desktop::scheme_command(&dirs) {
+            Some(cmd) => out.line(format!("displaygroups:// is handled by: {cmd}")),
+            None => out.line("displaygroups:// is not registered."),
+        },
+    }
+    Ok(EXIT_OK)
+}
+
+/// The icon a desktop entry shows for a group: a theme icon for built-in icons, the
+/// file itself for custom ones.
+fn entry_icon(ctx: &Ctx, icon: &str) -> String {
+    match icon.strip_prefix("file:") {
+        Some(name) => ctx
+            .paths
+            .icons_dir
+            .join(Path::new(name).file_name().unwrap_or_default())
+            .to_string_lossy()
+            .into_owned(),
+        None => desktop::theme_icon(icon.strip_prefix("builtin:").unwrap_or("monitor")).into(),
+    }
+}
+
+/// `--icon`: a built-in name, or a picture (.png, .svg, .ico) copied into the icons folder.
+fn import_icon(ctx: &Ctx, value: &str) -> Result<String, CliError> {
+    const BUILTIN: [&str; 5] = ["monitor", "couch", "dual", "gaming", "work"];
+    if let Some(name) = value.strip_prefix("builtin:") {
+        if !BUILTIN.contains(&name) {
+            return Err(CliError::Usage(format!(
+                "unknown built-in icon \"{name}\"; use one of {}",
+                BUILTIN.join(", ")
+            )));
+        }
+        return Ok(value.to_string());
+    }
+    let source = Path::new(value);
+    let file = source
+        .file_name()
+        .map(|n| format!("custom-{}", n.to_string_lossy()))
+        .ok_or_else(|| CliError::Usage(format!("{value} is not a file")))?;
+    let bytes = std::fs::read(source).map_err(|e| CliError::Usage(format!("{value}: {e}")))?;
+    store::write_atomic(&ctx.paths.icons_dir.join(&file), &bytes)?;
+    Ok(format!("file:{file}"))
+}
+
+fn shortcut(
+    ctx: &Ctx,
+    cfg: &mut Config,
+    key: &str,
+    on_desktop: bool,
+    in_apps: bool,
+    icon: Option<&str>,
+    out: Output,
+) -> Result<i32, CliError> {
+    let id = find(cfg, key)?.id;
+    if let Some(value) = icon {
+        let new_icon = import_icon(ctx, value)?;
+        let group = cfg.group_by_id_mut(id).expect("found above");
+        if group.icon != new_icon {
+            group.icon = new_icon;
+            store::save(&ctx.config_path, cfg)?;
+        }
+    }
+    let group = cfg.group_by_id(id).expect("found above");
+    let dirs = dirs()?;
+    let text = desktop::launcher_entry(
+        &self_exe()?,
+        &group.id.to_string(),
+        &group.name,
+        &entry_icon(ctx, &group.icon),
+    );
+    let file = desktop::launcher_file_name(&group.id.to_string());
+    let places = match (on_desktop, in_apps) {
+        (false, true) => vec![&dirs.applications],
+        (true, true) => vec![&dirs.desktop, &dirs.applications],
+        _ => vec![&dirs.desktop],
+    };
+    for dir in places {
+        let path = desktop::write_launcher(dir, &file, &text).map_err(CliError::Config)?;
+        out.line(format!("Created {}", path.display()));
+    }
+    if in_apps {
+        out.line("It is in the app grid: right-click it and choose \"Pin to Dash\" to keep it in the dock.");
+    }
+    Ok(EXIT_OK)
+}
+
+/// The on-screen display after a switch: a short desktop notification with the group
+/// and the new primary's mode, unless the OSD is turned off.
+pub(crate) fn announce(ctx: &Ctx, cfg: &Config, title: &str, detail: &str, icon: &str) {
+    let osd = &cfg.settings.osd;
+    if !osd.enabled {
+        return;
+    }
+    let timeout = i32::try_from(osd.duration_ms.max(1000)).unwrap_or(i32::MAX);
+    if let Err(e) = dg_gnome::notify::notify(title, detail, &entry_icon(ctx, icon), timeout) {
+        tracing::info!("no notification: {e}");
+    }
+}
+
+pub(crate) fn mode_text(p: Option<PrimaryInfo>) -> String {
+    p.map(|p| {
+        let rate = p
+            .refresh_milli_hz
+            .map(|m| format!(" · {} Hz", crate::common::hz(m)))
+            .unwrap_or_default();
+        format!("{} × {}{rate}", p.width, p.height)
+    })
+    .unwrap_or_default()
 }
 
 pub(crate) fn apply(
@@ -104,7 +275,9 @@ pub(crate) fn apply(
     };
     tracing::info!(group = %group.name, ?trigger, ?method, plan = ?plan, "applying");
     mutter.apply(&plan, method)?;
-    write_last_switch(ctx, group, primary_of(&plan, &state));
+    let primary = primary_of(&plan, &state);
+    write_last_switch(ctx, group, primary);
+    announce(ctx, cfg, &group.name, &mode_text(primary), &group.icon);
     if let Err(e) = store::write_json(&ctx.paths.lkg_file(), &plan) {
         out.warn(format!("could not save the last layout: {e}"));
     }

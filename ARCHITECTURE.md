@@ -143,7 +143,7 @@
 | D6 | v1.0 additions: theme switcher, flash-free launch, motion, i18n/RTL readiness, OSD, Duplicate Group, per-group volume, pre/post-switch actions, `displaygroups://` URI, disconnect auto-fallback | Approved (§9–§11) |
 | D7 | Deferred to v1.1: window-position restore, automatic triggers, DDC/CI brightness, auto-updater | Planned in §15 |
 | D8 | v1.1 choices (2026-11-19). **Order:** automatic switching first, then window positions, DDC/CI, and the update notice last. **Triggers:** a program starting (switch back when it ends) and a game controller connecting. **Windows:** saved automatically per group. **Updates:** notice only, off by default; never downloads or installs | Approved (§15); §15.1 done |
-| D9 | Linux (2026-11-19). **Scope:** a full port to Ubuntu GNOME (Wayland and X11) through Mutter's DisplayConfig D-Bus API, in phases L1–L4. **Build:** WSL Ubuntu 24.04 on the development PC. **Test:** an Ubuntu GNOME VM | Approved (§16); L1 done |
+| D9 | Linux (2026-11-19). **Scope:** a full port to Ubuntu GNOME (Wayland and X11) through Mutter's DisplayConfig D-Bus API, in phases L1–L4. **Build:** WSL Ubuntu 24.04 on the development PC. **Test:** an Ubuntu GNOME VM | Approved (§16); L1 and L2 done |
 
 ---
 
@@ -965,26 +965,18 @@ Settings, `gnome-monitor-config` and `gnome-randr` use the same interface.
 | Phase | Content | Status |
 |---|---|---|
 | **L1** | GNOME backend; the CLI on Linux: `status`, `list`, `capture`, `validate`, `apply`, `toggle`, `duplicate`, `recover [--extend]`, `uri` | **Done** |
-| **L2** | Agent: see the list below | Planned |
+| **L2** | The agent and desktop integration (§16.5) | **Done**, except `identify`, moved to L3 |
 | **L3** | Settings app on Linux: see the list below | Planned |
 | **L4** | Packaging: see the list below | Planned |
-
-**L2, the agent:**
-- tray icon through StatusNotifierItem (Ubuntu ships the AppIndicator extension);
-- hotkeys as GNOME custom shortcuts that run `displaygroups apply …` (no global key grabs
-  exist for apps on Wayland);
-- on-screen display through desktop notifications;
-- `MonitorsChanged` for the disconnect fallback;
-- triggers from `/proc` and evdev game controllers (window-title filters are X11 only);
-- autostart `.desktop` file, the `x-scheme-handler/displaygroups` link handler, and
-  `.desktop` shortcuts;
-- `identify`.
 
 **L3, the settings app:**
 - Tauri on WebKitGTK;
 - the portal file dialog;
 - `MonitorsChanged` instead of the hidden window;
-- Windows-only options hidden.
+- Windows-only options hidden;
+- `identify`: GNOME Shell only lets GNOME Settings show its monitor labels, and Wayland
+  clients cannot place windows. The settings app's own full-screen windows, one per
+  monitor, will do it.
 
 **L4, packaging:**
 - `.deb` and AppImage from the Tauri bundler (WSL, later a CI job);
@@ -1009,7 +1001,80 @@ Settings, `gnome-monitor-config` and `gnome-randr` use the same interface.
   - `recover --extend`.
 - **Not verified yet:**
   - real monitors and real EDIDs in sysfs;
-  - GNOME Shell's "Keep these display settings?" for persistent switches (the headless test
-    used temporary ones);
+  - GNOME Shell's "Keep these display settings?" for persistent switches. Headless Mutter
+    has no shell, so its persistent switches apply without asking;
   - X11 sessions;
   - rotation.
+
+### 16.5 The agent on Linux (L2, as built)
+
+`displaygroups agent` runs one event loop (`apps/cli/src/linux_agent.rs`). Events come
+from a one-second ticker, Mutter's `MonitorsChanged` signal, the tray menu and finished
+switches. Switches run on a worker thread through the CLI's own `apply`/`toggle`/`recover`.
+
+- **Hotkeys are GNOME custom shortcuts** (`dg_gnome::keybindings`). Wayland gives
+  applications no global key grabs, so the agent writes the config's hotkeys into GNOME's
+  "Custom Shortcuts" (the `org.gnome.settings-daemon.plugins.media-keys` schema, via
+  `gsettings`). GNOME then runs `displaygroups apply|toggle|recover …` itself.
+  - Ours live under `…/custom-keybindings/displaygroups-N/`, so the user's own custom
+    shortcuts are never touched.
+  - They are rewritten at agent start and when the config changes, only if they differ.
+    `--dry-run` leaves them alone.
+  - They keep working while the agent is not running, which differs from Windows.
+  - Chords are converted by `Chord::gtk_accelerator` (`Ctrl+Alt+F12` → `<Control><Alt>F12`).
+    A chord GNOME has no key name for is reported.
+  - "On the lock screen" does not apply: GNOME does not run custom shortcuts while locked.
+- **Tray** (`dg_gnome::tray`, the ksni crate):
+  - a StatusNotifierItem, which Ubuntu's top bar shows through its AppIndicator extension;
+  - the same menu as on Windows, with the group on screen ticked; a left click opens it;
+  - it starts even when no tray host is up yet (`assume_sni_available`), since the agent
+    can start before the top bar.
+- **On-screen display:** every switch, from the CLI, a GNOME shortcut, the tray or a
+  trigger, shows a desktop notification (`org.freedesktop.Notifications`).
+  - It is transient, lasts `osd.durationMs`, and shows the group's icon, name and new mode.
+  - Agent errors also become notifications, since nobody sees the agent's output.
+- **Automatic switching** (`dg_gnome::detect`):
+  - Programs are read from `/proc/*/cmdline`: the first argument without its folder, in
+    lower case.
+  - `.exe` is appended (`steam` → `steam.exe`), so trigger names work the same as on Windows
+    and Proton games (`Game.exe`) match as they are.
+  - A controller is `/sys/class/input/js*` or an input device udev tags
+    `ID_INPUT_JOYSTICK`. Programs and controllers are polled every 2 s while a trigger needs
+    them.
+  - Window-title filters cannot work on Wayland; such triggers never start, and the log
+    says so.
+- **Disconnect fallback:**
+  - `MonitorsChanged` starts the debounce. If every display that was on is gone, the
+    fallback group is applied — only if it can be planned now.
+  - It uses the same grace period and cooldown as on Windows.
+- **Config reload:** the config file's modification time is checked every 2 s. A change
+  re-reads the config, re-syncs the shortcuts, re-arms the triggers and refreshes the tray.
+- **One agent per user:** a lock on `$XDG_STATE_HOME/displaygroups/state/agent.lock`, via
+  `File::try_lock`.
+- **Desktop integration** (`dg_gnome::desktop`), all in the user's own folders:
+  - `startup on|off|status`: `~/.config/autostart/displaygroups.desktop`.
+  - `protocol on|off|status`: a hidden `displaygroups-url.desktop` handler, set as the
+    default for `x-scheme-handler/displaygroups` in `~/.config/mimeapps.list`. Other entries
+    are kept.
+  - `shortcut`: `displaygroups-<id>.desktop` launchers on the Desktop (from
+    `user-dirs.dirs`) and/or in the app grid. They are made executable and trusted for
+    GNOME's desktop icons.
+    - Built-in icons map to theme icons (`input-gaming`, `computer`, `video-display`).
+    - `--icon` also takes a PNG or SVG.
+  - `Exec` arguments are quoted per the Desktop Entry spec, and GNOME shortcut commands
+    with shell quoting. An AppImage registers `$APPIMAGE`, not its temporary mount.
+- **Verified** end to end in WSL, on a private session bus with headless Mutter 46,
+  GSettings in a keyfile:
+  - the user's own custom shortcut was kept, and ours was written and then updated by a
+    config change;
+  - the tray menu over `com.canonical.dbusmenu` listed the groups and actions, and clicking
+    a group switched to it;
+  - a program trigger switched when the program started and back after it ended;
+  - a second agent refused to start;
+  - `startup`, `protocol` and `shortcut` wrote and removed their files.
+- **Not verified yet:**
+  - the icon in a real GNOME top bar;
+  - notifications (headless has no notification server);
+  - GNOME actually running a custom shortcut;
+  - a real game controller;
+  - the fallback with real hot-plugs.

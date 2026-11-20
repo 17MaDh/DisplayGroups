@@ -191,18 +191,30 @@ GNOME's own display service, the one GNOME Settings uses.
 - **Available now: the command line.** These commands work as on Windows:
   - `status`, `list`, `capture`, `validate`, `apply`, `toggle`;
   - `duplicate`, `recover [--extend]`, and `displaygroups://` links.
+- **Available now: the agent** (`displaygroups agent`):
+  - a tray icon in the top bar, with the same menu as on Windows;
+  - automatic switching when a program starts or a game controller connects;
+  - the disconnect fallback;
+  - a notification after each switch.
+- **Hotkeys:** the agent writes your hotkeys into GNOME's own **Custom Shortcuts**
+  (Settings → Keyboard), named "DisplayGroups: …". GNOME runs them, so they work even when
+  the agent is not running, and your other shortcuts are left alone.
+- **Integration:**
+  - `startup on` starts the agent when you log in;
+  - `protocol on` handles `displaygroups://` links;
+  - `shortcut` puts a launcher on the Desktop or in the app grid.
 - **How a switch is confirmed:** GNOME itself asks "Keep these display settings?". `--no-confirm`
   switches without asking, but GNOME brings back its remembered layout at the next sign-in.
 - **Settings:** in `~/.config/displaygroups/config.json`. A config captured on Windows
   recognises the same monitors.
-- **Not yet:** the tray agent, hotkeys, automatic switching, the settings app, and
-  `.deb`/AppImage packages.
+- **Not yet:** the settings app, `identify`, and `.deb`/AppImage packages.
 
 ```bash
 tar xzf DisplayGroups-<version>-linux-x64-cli.tar.gz
 cd DisplayGroups-<version>-linux-x64-cli
-./displaygroups status
 ./displaygroups capture "Desktop"
+./displaygroups startup on        # the agent from the next login
+./displaygroups agent &           # or right now
 ```
 
 ## Building from source

@@ -11,7 +11,16 @@
 //! * [`plan`]: a group turned into the `ApplyMonitorsConfig` arguments.
 //! * [`layout`]: converting between the config's pixel layout and Mutter's logical one.
 //! * `dbus` (Linux only): the D-Bus client, plus EDIDs from `/sys/class/drm`.
+//!
+//! Desktop integration for the agent (phase L2):
+//! * [`desktop`]: autostart, the `displaygroups://` handler and launchers (`.desktop`).
+//! * [`keybindings`]: hotkeys as GNOME custom shortcuts.
+//! * [`detect`]: running programs and game controllers, for automatic switching.
+//! * `notify`, `tray` (Linux only): notifications and the StatusNotifierItem tray icon.
 
+pub mod desktop;
+pub mod detect;
+pub mod keybindings;
 pub mod layout;
 pub mod observe;
 pub mod ops;
@@ -20,6 +29,10 @@ pub mod state;
 
 #[cfg(target_os = "linux")]
 pub mod dbus;
+#[cfg(target_os = "linux")]
+pub mod notify;
+#[cfg(target_os = "linux")]
+pub mod tray;
 
 pub use ops::{capture, current_group, status};
 pub use plan::{extend_all, plan, ApplyConfig, LogicalConfig};

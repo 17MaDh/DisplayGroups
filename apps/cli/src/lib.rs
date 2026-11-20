@@ -12,6 +12,8 @@ mod common;
 mod i18n;
 #[cfg(windows)]
 mod integrate;
+#[cfg(not(windows))]
+mod linux_agent;
 mod logging;
 mod output;
 mod sys;

@@ -15,6 +15,7 @@
   "tray.recover": "Recover last working layout",
   "tray.settings": "Settings…",
   "tray.startWithWindows": "Start with Windows",
+  "tray.startAtLogin": "Start when I log in",
   "tray.startMinimized": "Start minimized",
   "tray.exit": "Exit",
   "tray.settingsMissing": "The settings app is not installed in this build yet.",

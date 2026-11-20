@@ -154,6 +154,33 @@ impl Mutter {
     }
 }
 
+/// Calls `on_change` on a background thread whenever Mutter reports that the monitors
+/// changed (a switch, a hot-plug, a change in GNOME Settings).
+pub fn watch_changes(on_change: impl Fn() + Send + 'static) -> Result<(), GnomeError> {
+    let conn = Connection::session().map_err(|e| GnomeError::Unavailable(e.to_string()))?;
+    let rule = zbus::MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .interface(IFACE)
+        .and_then(|b| b.member("MonitorsChanged"))
+        .map_err(|e| GnomeError::Unavailable(e.to_string()))?
+        .build();
+    let messages = zbus::blocking::MessageIterator::for_match_rule(rule, &conn, Some(16))
+        .map_err(|e| GnomeError::Unavailable(e.to_string()))?;
+    std::thread::Builder::new()
+        .name("monitors-changed".into())
+        .spawn(move || {
+            // Keeps the connection alive for as long as the iterator.
+            let _conn = conn;
+            for message in messages {
+                if message.is_ok() {
+                    on_change();
+                }
+            }
+        })
+        .map(drop)
+        .map_err(|e| GnomeError::Unavailable(e.to_string()))
+}
+
 fn dbus_message(e: &zbus::Error) -> String {
     match e {
         zbus::Error::MethodError(_, Some(desc), _) => desc.clone(),
