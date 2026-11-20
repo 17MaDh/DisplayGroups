@@ -10,7 +10,8 @@
                  of displaygroups.exe, displaygroupsw.exe and displaygroups-settings.exe.
       Package    The installer (Tauri's NSIS bundler with tauri.release.conf.json),
                  the portable ZIP, then Checksums.
-      Checksums  SHA256SUMS.txt for the .exe and .zip files in the output folder.
+      Checksums  SHA256SUMS.txt for the .exe, .zip and .tar.gz files in the output
+                 folder (the release workflow adds the Linux package before this stage).
                  Run it again after anything changes those files (installer signing).
 
     Signing is off unless DG_SIGN_MODE is set; scripts/sign.ps1 describes the modes
@@ -172,7 +173,7 @@ function Build-Portable([string]$ver) {
 function Write-Checksums {
     Write-Host '==> SHA256SUMS.txt' -ForegroundColor Cyan
     $lines = Get-ChildItem -LiteralPath $OutDir -File |
-        Where-Object { $_.Extension -in '.exe', '.zip' } |
+        Where-Object { $_.Extension -in '.exe', '.zip' -or $_.Name -like '*.tar.gz' } |
         Sort-Object Name |
         ForEach-Object { '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
     if (-not $lines) { throw "Nothing to checksum in $OutDir." }

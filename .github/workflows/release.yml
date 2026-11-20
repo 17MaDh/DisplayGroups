@@ -1,8 +1,10 @@
 name: Release
 
 # Pushing a tag such as v1.0.0 builds, tests and (when SignPath is set up) signs a
-# release, then creates a *draft* GitHub release with the installer, the portable ZIP
-# and SHA256SUMS.txt. A maintainer reviews the draft and publishes it by hand.
+# release, then creates a *draft* GitHub release with the Windows installer, the portable
+# ZIP, the Linux command-line package and SHA256SUMS.txt. A maintainer reviews the draft
+# and publishes it by hand. Versions below 1.0 and tags with a suffix (v1.1.0-rc.1) are
+# marked as pre-releases.
 #
 # Signing is optional. It is on when the repository variable SIGNPATH_ORGANIZATION_ID
 # is set; docs/releasing.md lists the other variables, the secret and the SignPath
@@ -20,8 +22,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The Linux command line and agent for GNOME (ARCHITECTURE.md §16), checked, tested and
+  # packed by scripts/build-linux.sh.
+  linux:
+    name: Build the Linux package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag matches the version
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [[ "${GITHUB_REF_NAME#v}" != "$version" ]]; then
+            echo "The tag says $GITHUB_REF_NAME but Cargo.toml says $version." >&2
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check, test and package
+        run: bash scripts/build-linux.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-package
+          path: dist-release/*-linux-x64-cli.tar.gz
+          if-no-files-found: error
+
   release:
     name: Build, sign and draft the release
+    needs: linux
     # GitHub-hosted, as SignPath's open-source signing requires for every job that
     # leads to a signing request.
     runs-on: windows-latest
@@ -181,22 +213,50 @@ jobs:
           $bad = @($files | Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' })
           if ($bad) { throw "Not signed: $($bad.Name -join ', ')" }
 
+      # ---- The Linux package ----------------------------------------------------------
+
+      - name: Add the Linux package
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-package
+          path: dist-release
+
+      - name: Checksums for every download
+        run: ./scripts/build.ps1 -Stage Checksums -Version $env:GITHUB_REF_NAME
+
       # ---- Draft release ------------------------------------------------------------
 
       - name: Release notes
         run: |
+          $v = $env:GITHUB_REF_NAME.TrimStart('v')
           $signed = if ($env:SIGNPATH -eq 'true') {
             'The installer and executables are signed. Free code signing provided by SignPath.io, certificate by SignPath Foundation.'
           } else {
-            'This build is **not code-signed**. Windows SmartScreen will warn, and on PCs with Smart App Control turned on it will not run. See "Smart App Control and SmartScreen" in the README.'
+            'The Windows build is **not code-signed**. Windows SmartScreen will warn, and on PCs with Smart App Control turned on it will not run. See "Smart App Control and SmartScreen" in the README.'
           }
           @"
+          ## Downloads
+
+          | | File |
+          |---|---|
+          | **Windows 10 and 11**, installer | ``DisplayGroups-$v-setup-x64.exe`` |
+          | **Windows 10 and 11**, portable | ``DisplayGroups-$v-portable-x64.zip`` |
+          | **Linux** (preview), GNOME on Ubuntu 24.04 or later | ``DisplayGroups-$v-linux-x64-cli.tar.gz`` |
+
           $signed
 
-          Check a download against ``SHA256SUMS.txt``:
+          The Linux package has the command line and the agent: the tray icon, hotkeys as GNOME shortcuts, automatic switching and notifications. The settings app for Linux is not in it yet. See "Linux (preview)" in the README.
+
+          ## Check a download
+
+          Compare it with ``SHA256SUMS.txt``.
 
           ``````powershell
-          (Get-FileHash .\DisplayGroups-*-setup-x64.exe -Algorithm SHA256).Hash
+          (Get-FileHash .\DisplayGroups-$v-setup-x64.exe -Algorithm SHA256).Hash
+          ``````
+
+          ``````bash
+          sha256sum -c SHA256SUMS.txt --ignore-missing
           ``````
           "@ | Set-Content -Encoding utf8 release-notes.md
 
@@ -204,6 +264,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: true
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') || contains(github.ref_name, '-') }}
           name: DisplayGroups ${{ github.ref_name }}
           body_path: release-notes.md
           generate_release_notes: true
@@ -211,4 +272,5 @@ jobs:
           files: |
             dist-release/*-setup-x64.exe
             dist-release/*-portable-x64.zip
+            dist-release/*-linux-x64-cli.tar.gz
             dist-release/SHA256SUMS.txt
