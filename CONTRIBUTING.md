@@ -24,9 +24,12 @@ them to pass, plus `npm run typecheck` when you touch the UI.
 - **Settings app with live reload:** `npm run tauri dev` in `apps\settings`.
 - **Release build:** `.\scripts\build.ps1` builds the installer and ZIP
   ([docs/releasing.md](docs/releasing.md)).
-- **Linux** (ARCHITECTURE.md §16): on Ubuntu 24.04, or in WSL, with rustup, `build-essential`
-  and `pkg-config`, run `bash scripts/build-linux.sh`. It runs the same checks for the Linux
-  crates, then builds and packs the command line. CI runs them too.
+- **Linux** (ARCHITECTURE.md §16): on Ubuntu 24.04, or in WSL, with rustup, `build-essential`,
+  `pkg-config` and `libwebkit2gtk-4.1-dev`, build the page (`npm ci` and `npm run build` in
+  `apps/settings`; from WSL, on Windows) and run `bash scripts/build-linux.sh`. It runs the
+  same checks for the Linux crates, then builds and packs the command line and the settings
+  app. CI runs them too. The page's strings can differ per system: `<key>@linux` in the
+  locale files is used instead of `<key>` on Linux.
 
 ## Where things live
 
@@ -40,7 +43,7 @@ them to pass, plus `npm run typecheck` when you touch the UI.
 | `crates/dg-win` | **All** Win32 code: CCD, audio, tray, dialogs, OSD, shell integration |
 | `crates/dg-gnome` | Linux: GNOME's display service (Mutter D-Bus), tray, shortcuts, desktop files |
 | `apps/cli` | `displaygroups.exe` / `displaygroupsw.exe`: the CLI and the agent |
-| `apps/settings` | The settings app: Tauri v2 (`src-tauri/`) and TypeScript/Vite (`ui/`) |
+| `apps/settings` | The settings app: Tauri v2 (`src-tauri/`, with `win.rs` and `linux.rs`) and TypeScript/Vite (`ui/`) |
 | `locales/` | UI strings shared by the native parts and the settings app |
 | `scripts/` | `build.ps1`, `sign.ps1` and `build-linux.sh` |
 | `tools/lockscreen-spike` | A feasibility test; never shipped |

@@ -33,7 +33,7 @@ monitors) and "Gaming on Couch" (the TV only).
 >   - the release pipeline.
 > - **Next:** testing real switching on more hardware before 1.0.
 > - **In progress:** the Linux port for GNOME ([Linux (preview)](#linux-preview)). The
->   command line and the agent work; the settings app is next.
+>   command line, the agent and the settings app work; `.deb`/AppImage packages are next.
 > - **Waiting on a feasibility test:** hotkeys on the lock screen
 >   ([docs/lockscreen-spike.md](docs/lockscreen-spike.md)).
 >
@@ -98,8 +98,9 @@ Versions before 1.0 are pre-releases, and the Windows build is not code-signed y
   - Unzip anywhere you can write to and run `displaygroups-settings.exe`.
   - Everything is kept in a `data` folder next to it.
   - Delete `portable.flag` to use the normal locations instead.
-- **Linux, preview** (`DisplayGroups-<version>-linux-x64-cli.tar.gz`): the command line and
-  the agent for GNOME. See [Linux (preview)](#linux-preview).
+- **Linux, preview** (`DisplayGroups-<version>-linux-x64.tar.gz`): the settings app, the
+  command line and the agent for GNOME. See [Linux (preview)](#linux-preview). Up to
+  v0.1.0 the package was `…-linux-x64-cli.tar.gz`, without the settings app.
 
 The settings app uses Microsoft Edge WebView2, which Windows 11 includes. On Windows 10 the
 installer downloads it if it is missing.

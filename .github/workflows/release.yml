@@ -2,7 +2,7 @@ name: Release
 
 # Pushing a tag such as v1.0.0 builds, tests and (when SignPath is set up) signs a
 # release, then creates a *draft* GitHub release with the Windows installer, the portable
-# ZIP, the Linux command-line package and SHA256SUMS.txt. A maintainer reviews the draft
+# ZIP, the Linux package and SHA256SUMS.txt. A maintainer reviews the draft
 # and publishes it by hand. Versions below 1.0 and tags with a suffix (v1.1.0-rc.1) are
 # marked as pre-releases.
 #
@@ -22,8 +22,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # The Linux command line and agent for GNOME (ARCHITECTURE.md §16), checked, tested and
-  # packed by scripts/build-linux.sh.
+  # The Linux settings app, command line and agent for GNOME (ARCHITECTURE.md §16),
+  # checked, tested and packed by scripts/build-linux.sh.
   linux:
     name: Build the Linux package
     runs-on: ubuntu-24.04
@@ -38,6 +38,23 @@ jobs:
             exit 1
           fi
 
+      - name: WebKitGTK for the settings app
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev librsvg2-dev
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: apps/settings/package-lock.json
+
+      - name: Settings UI (Tauri embeds apps/settings/dist)
+        working-directory: apps/settings
+        run: |
+          npm ci
+          npm run build
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -48,7 +65,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: linux-package
-          path: dist-release/*-linux-x64-cli.tar.gz
+          path: dist-release/*-linux-x64.tar.gz
           if-no-files-found: error
 
   release:
@@ -241,11 +258,11 @@ jobs:
           |---|---|
           | **Windows 10 and 11**, installer | ``DisplayGroups-$v-setup-x64.exe`` |
           | **Windows 10 and 11**, portable | ``DisplayGroups-$v-portable-x64.zip`` |
-          | **Linux** (preview), GNOME on Ubuntu 24.04 or later | ``DisplayGroups-$v-linux-x64-cli.tar.gz`` |
+          | **Linux** (preview), GNOME on Ubuntu 24.04 or later | ``DisplayGroups-$v-linux-x64.tar.gz`` |
 
           $signed
 
-          The Linux package has the command line and the agent: the tray icon, hotkeys as GNOME shortcuts, automatic switching and notifications. The settings app for Linux is not in it yet. See "Linux (preview)" in the README.
+          The Linux package has the settings app, the command line and the agent: the tray icon, hotkeys as GNOME shortcuts, automatic switching and notifications. It needs WebKitGTK 4.1 (``libwebkit2gtk-4.1-0``, installed on Ubuntu desktops). See "Linux (preview)" in the README.
 
           ## Check a download
 
@@ -272,5 +289,5 @@ jobs:
           files: |
             dist-release/*-setup-x64.exe
             dist-release/*-portable-x64.zip
-            dist-release/*-linux-x64-cli.tar.gz
+            dist-release/*-linux-x64.tar.gz
             dist-release/SHA256SUMS.txt
