@@ -7,6 +7,7 @@
 **Switch your PC between groups of displays with one click, a hotkey, or automatically.**
 
 [![CI](https://github.com/17MaDh/DisplayGroups/actions/workflows/ci.yml/badge.svg)](https://github.com/17MaDh/DisplayGroups/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/17MaDh/DisplayGroups?include_prereleases&sort=semver)](https://github.com/17MaDh/DisplayGroups/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4.svg)](#install)
 [![Linux: GNOME preview](https://img.shields.io/badge/Linux-GNOME%20preview-E95420.svg)](#linux-preview)
@@ -83,9 +84,9 @@ monitors) and "Gaming on Couch" (the TV only).
 
 ## Install
 
-> No release is published yet. Until the first one, [build from source](#building-from-source).
-
-Download from [Releases](https://github.com/17MaDh/DisplayGroups/releases):
+Download the latest version from [Releases](https://github.com/17MaDh/DisplayGroups/releases).
+Versions before 1.0 are pre-releases, and the Windows build is not code-signed yet (see
+[Smart App Control and SmartScreen](#smart-app-control-and-smartscreen)).
 
 - **Installer** (`DisplayGroups-<version>-setup-x64.exe`)
   - Installs for all users in `C:\Program Files\DisplayGroups` and needs admin rights.
@@ -97,6 +98,8 @@ Download from [Releases](https://github.com/17MaDh/DisplayGroups/releases):
   - Unzip anywhere you can write to and run `displaygroups-settings.exe`.
   - Everything is kept in a `data` folder next to it.
   - Delete `portable.flag` to use the normal locations instead.
+- **Linux, preview** (`DisplayGroups-<version>-linux-x64-cli.tar.gz`): the command line and
+  the agent for GNOME. See [Linux (preview)](#linux-preview).
 
 The settings app uses Microsoft Edge WebView2, which Windows 11 includes. On Windows 10 the
 installer downloads it if it is missing.
