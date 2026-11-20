@@ -862,7 +862,7 @@ dependencies = [
 
 [[package]]
 name = "dg-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dg-identity",
  "dg-model",
@@ -875,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "dg-gnome"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dg-engine",
  "dg-hotkey",
@@ -892,14 +892,14 @@ dependencies = [
 
 [[package]]
 name = "dg-hotkey"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "dg-identity"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dg-model",
  "serde",
@@ -908,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "dg-ipc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dg-hotkey",
  "dg-model",
@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "dg-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -930,7 +930,7 @@ dependencies = [
 
 [[package]]
 name = "dg-win"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dg-engine",
  "dg-identity",
@@ -1006,7 +1006,7 @@ dependencies = [
 
 [[package]]
 name = "displaygroups"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "dg-engine",
@@ -1027,7 +1027,7 @@ dependencies = [
 
 [[package]]
 name = "displaygroups-settings"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dg-engine",
  "dg-gnome",
@@ -2297,7 +2297,7 @@ dependencies = [
 
 [[package]]
 name = "lockscreen-spike"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dg-engine",
  "dg-win",
