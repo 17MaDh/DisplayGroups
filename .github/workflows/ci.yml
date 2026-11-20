@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  windows:
+    name: Windows
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,3 +34,23 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+
+  # The GNOME backend, the command line and the agent on Linux (ARCHITECTURE.md §16),
+  # as scripts/build-linux.sh checks them.
+  linux:
+    name: Linux (GNOME)
+    runs-on: ubuntu-24.04
+    env:
+      PACKAGES: -p dg-model -p dg-identity -p dg-hotkey -p dg-engine -p dg-gnome -p displaygroups
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Lint
+        run: cargo clippy --locked $PACKAGES --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked $PACKAGES

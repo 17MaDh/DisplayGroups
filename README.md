@@ -1,9 +1,27 @@
+<div align="center">
+
+<img src="docs/images/banner.svg" alt="Two desk monitors switch to the living-room TV and back with one hotkey" width="860">
+
 # DisplayGroups
 
-Switch Windows between **groups of displays** with one click, a shortcut or a hotkey. For
-example, "Desktop" (two monitors) and "Gaming on Couch" (the living-room TV only). Each group
-sets exactly which displays are on and, for each one, the primary, resolution, refresh rate,
-position, rotation, scale and HDR. It can also set the sound output and volume.
+**Switch your PC between groups of displays with one click, a hotkey, or automatically.**
+
+[![CI](https://github.com/17MaDh/DisplayGroups/actions/workflows/ci.yml/badge.svg)](https://github.com/17MaDh/DisplayGroups/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4.svg)](#install)
+[![Linux: GNOME preview](https://img.shields.io/badge/Linux-GNOME%20preview-E95420.svg)](#linux-preview)
+[![Rust](https://img.shields.io/badge/Rust-stable-B7410E.svg?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB.svg?logo=tauri&logoColor=white)](https://tauri.app)
+
+[Features](#features) · [Install](#install) · [Getting started](#getting-started) ·
+[Command line](#command-line) · [Linux](#linux-preview) · [Architecture](ARCHITECTURE.md)
+
+</div>
+
+Monitors at the desk for work, the living-room TV for games. A **group** remembers which
+displays are on, and for each one the primary, resolution, refresh rate, position, rotation,
+scale and HDR. It can also set the sound output and volume. For example, "Desktop" (two
+monitors) and "Gaming on Couch" (the TV only).
 
 > **Status: pre-release.**
 > - **Built and tested:**
@@ -13,6 +31,8 @@ position, rotation, scale and HDR. It can also set the sound output and volume.
 >   - the installer and portable ZIP;
 >   - the release pipeline.
 > - **Next:** testing real switching on more hardware before 1.0.
+> - **In progress:** the Linux port for GNOME ([Linux (preview)](#linux-preview)). The
+>   command line and the agent work; the settings app is next.
 > - **Waiting on a feasibility test:** hotkeys on the lock screen
 >   ([docs/lockscreen-spike.md](docs/lockscreen-spike.md)).
 >
@@ -63,7 +83,9 @@ position, rotation, scale and HDR. It can also set the sound output and volume.
 
 ## Install
 
-Download from [Releases](../../releases):
+> No release is published yet. Until the first one, [build from source](#building-from-source).
+
+Download from [Releases](https://github.com/17MaDh/DisplayGroups/releases):
 
 - **Installer** (`DisplayGroups-<version>-setup-x64.exe`)
   - Installs for all users in `C:\Program Files\DisplayGroups` and needs admin rights.

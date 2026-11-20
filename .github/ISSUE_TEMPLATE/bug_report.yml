@@ -1,0 +1,60 @@
+name: Bug report
+description: Something does not work as the README describes.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security problems go through [private reporting](https://github.com/17MaDh/DisplayGroups/security/advisories/new), not here.
+
+        A screen that stays black after a switch comes back by itself after 15 seconds (on GNOME, 20), or run `displaygroups recover`.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: And what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Capture "Desktop" with both monitors on.
+        2. Press Ctrl+Alt+F12.
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: DisplayGroups version
+      description: Settings → Diagnostics, or `displaygroups --version`.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - Ubuntu, GNOME on Wayland
+        - Ubuntu, GNOME on X11
+        - Another Linux distribution
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Displays and graphics
+      description: The GPU and driver version, each display and how it is connected (HDMI, DisplayPort, dock), and the groups you switched between.
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        Settings → Diagnostics → Open logs folder, then paste the part around the problem.
+        Windows: `%LOCALAPPDATA%\DisplayGroups\logs`. Linux: `~/.local/state/displaygroups/logs`.
+      render: text

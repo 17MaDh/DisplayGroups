@@ -139,7 +139,7 @@
 | D2 | Product name **DisplayGroups**: binaries `displaygroups*.exe`, config `%APPDATA%\DisplayGroups\`, pipe/mutex names `DisplayGroups.*`, URI scheme `displaygroups://` | Approved |
 | D3 | Smart App Control stays **on** on the dev PC. Logic is tested through unit and mock-backend tests, on GitHub Actions `windows-latest` if SAC blocks local test binaries. Real-hardware testing of unsigned builds, including the §8.5 spike, happens on a Windows 11 VM or secondary PC with SAC off. Public releases target **SignPath Foundation** through `scripts/sign.ps1` | Approved |
 | D4 | Toolchain: rustup (stable MSVC), Visual Studio Build Tools 2022 (C++ workload + Windows SDK) and Git. Node.js LTS is installed when Phase 4 starts, because Phases 2–3 don't need it | Approved |
-| D5 | Repository at `C:\Users\ahmad\Projects\DisplayGroups`, MIT license | Approved |
+| D5 | Public repository on GitHub ([17MaDh/DisplayGroups](https://github.com/17MaDh/DisplayGroups)), MIT license | Approved |
 | D6 | v1.0 additions: theme switcher, flash-free launch, motion, i18n/RTL readiness, OSD, Duplicate Group, per-group volume, pre/post-switch actions, `displaygroups://` URI, disconnect auto-fallback | Approved (§9–§11) |
 | D7 | Deferred to v1.1: window-position restore, automatic triggers, DDC/CI brightness, auto-updater | Planned in §15 |
 | D8 | v1.1 choices (2026-11-19). **Order:** automatic switching first, then window positions, DDC/CI, and the update notice last. **Triggers:** a program starting (switch back when it ends) and a game controller connecting. **Windows:** saved automatically per group. **Updates:** notice only, off by default; never downloads or installs | Approved (§15); §15.1 done |

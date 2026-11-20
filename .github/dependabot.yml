@@ -1,0 +1,28 @@
+# Monthly, grouped updates: one pull request per ecosystem.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /apps/settings
+    schedule:
+      interval: monthly
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: [minor, patch]

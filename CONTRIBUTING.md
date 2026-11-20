@@ -24,6 +24,9 @@ them to pass, plus `npm run typecheck` when you touch the UI.
 - **Settings app with live reload:** `npm run tauri dev` in `apps\settings`.
 - **Release build:** `.\scripts\build.ps1` builds the installer and ZIP
   ([docs/releasing.md](docs/releasing.md)).
+- **Linux** (ARCHITECTURE.md §16): on Ubuntu 24.04, or in WSL, with rustup, `build-essential`
+  and `pkg-config`, run `bash scripts/build-linux.sh`. It runs the same checks for the Linux
+  crates, then builds and packs the command line. CI runs them too.
 
 ## Where things live
 
@@ -35,10 +38,11 @@ them to pass, plus `npm run typecheck` when you touch the UI.
 | `crates/dg-hotkey` | Chord parsing and known conflicts |
 | `crates/dg-ipc` | Pipe protocol and the secured pipe (for the lock-screen service) |
 | `crates/dg-win` | **All** Win32 code: CCD, audio, tray, dialogs, OSD, shell integration |
+| `crates/dg-gnome` | Linux: GNOME's display service (Mutter D-Bus), tray, shortcuts, desktop files |
 | `apps/cli` | `displaygroups.exe` / `displaygroupsw.exe`: the CLI and the agent |
 | `apps/settings` | The settings app: Tauri v2 (`src-tauri/`) and TypeScript/Vite (`ui/`) |
 | `locales/` | UI strings shared by the native parts and the settings app |
-| `scripts/` | `build.ps1` and `sign.ps1` |
+| `scripts/` | `build.ps1`, `sign.ps1` and `build-linux.sh` |
 | `tools/lockscreen-spike` | A feasibility test; never shipped |
 
 ## Rules

@@ -206,8 +206,8 @@ mod tests {
         assert_eq!(shell_quote("/opt/My Apps/dg"), "'/opt/My Apps/dg'");
         assert_eq!(shell_quote("it's"), "'it'\\''s'");
         assert_eq!(
-            gvariant_string("DisplayGroups: Ahmad's TV"),
-            "'DisplayGroups: Ahmad\\'s TV'"
+            gvariant_string("DisplayGroups: Sam's TV"),
+            "'DisplayGroups: Sam\\'s TV'"
         );
     }
 }
