@@ -1,35 +1,39 @@
-//! DisplayGroups settings app (ARCHITECTURE.md §9). Runs only while its window is open.
+//! DisplayGroups settings app (ARCHITECTURE.md §9, §16.6). Runs only while its window is
+//! open.
 //!
-//! Config editing, validation, monitor status/modes and the hotkey probe run
-//! in-process. Actions with side effects that the CLI already implements (capture,
-//! validate, shortcuts, startup, protocol, test-apply) run `displaygroups.exe` /
-//! `displaygroupsw.exe` next to this executable, so there is a single implementation.
+//! Config editing and validation run in-process and are the same on every system. The
+//! display status, modes, hotkey checks, change watching, dialogs and "Identify" are per
+//! system: `win.rs` (Windows) and `linux.rs` (GNOME). Actions with side effects that the
+//! CLI already implements (capture, validate, shortcuts, startup, protocol, test-apply)
+//! run the `displaygroups` executable next to this one, so there is a single
+//! implementation.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::{BTreeMap, HashMap};
-use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
 
-use dg_engine::ccd::Scope;
-use dg_engine::{DisplayBackend, Engine, Status};
+use dg_engine::Status;
 use dg_hotkey::Chord;
-use dg_identity::match_monitor;
 use dg_model::paths::AppPaths;
 use dg_model::validate::{self, Issue};
 use dg_model::{store, Config};
-use dg_win::window::{AgentEvent, AgentWindow};
-use dg_win::WinBackend;
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Manager, State};
+use tauri::{Manager, State};
 use uuid::Uuid;
 
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(windows)]
+#[path = "win.rs"]
+mod sys;
 
-struct App {
-    paths: AppPaths,
-    exe_dir: PathBuf,
+#[cfg(target_os = "linux")]
+#[path = "linux.rs"]
+mod sys;
+
+pub(crate) struct App {
+    pub paths: AppPaths,
+    pub exe_dir: PathBuf,
 }
 
 #[derive(Serialize)]
@@ -57,6 +61,21 @@ struct CliResult {
     output: String,
 }
 
+/// What the system says about a valid chord (see `probe` in `win.rs` / `linux.rs`).
+#[derive(Default)]
+pub(crate) struct Probe {
+    /// No other program or shortcut uses it.
+    pub free: bool,
+    /// Windows keeps it for itself.
+    pub reserved: Option<String>,
+    /// Who else uses it, or usually does.
+    pub known: Vec<String>,
+    /// DisplayGroups itself holds it now (`None`: the page works it out).
+    pub ours: Option<bool>,
+    /// The chord cannot be used on this system.
+    pub error: Option<String>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HotkeyProbe {
@@ -67,19 +86,25 @@ struct HotkeyProbe {
     free: Option<bool>,
     reserved: Option<String>,
     known: Vec<String>,
-    /// Whether the DisplayGroups agent is running (it holds the saved chords).
+    ours: Option<bool>,
+    /// Whether the DisplayGroups agent is running (it holds or syncs the saved chords).
     agent_running: bool,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Platform {
+    /// `"windows"` or `"linux"`; the page hides what the system does not support.
+    os: &'static str,
     mica: bool,
+    /// Windows build number (0 elsewhere).
     build: u32,
+    /// The system's name for Diagnostics, e.g. "Ubuntu 24.04.1 LTS · GNOME".
+    system: String,
     version: String,
-    /// English first, then every `locales\<code>.json`, with its own name for itself.
+    /// English first, then every `locales/<code>.json`, with its own name for itself.
     languages: Vec<Language>,
-    /// What the `"system"` setting resolves to (the Windows display language).
+    /// What the `"system"` setting resolves to (the system's display language).
     system_language: String,
 }
 
@@ -92,17 +117,27 @@ struct Language {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Integration {
-    startup: bool,
-    protocol: bool,
+pub(crate) struct Integration {
+    pub startup: bool,
+    pub protocol: bool,
 }
 
 #[derive(Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
-struct ModeOption {
-    width: u32,
-    height: u32,
-    refresh_hz: u32,
+pub(crate) struct ModeOption {
+    pub width: u32,
+    pub height: u32,
+    pub refresh_hz: u32,
+}
+
+/// The result of "Test" / "Apply now".
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyResult {
+    /// The CLI's exit code: 0 kept, 3 reverted, others failed.
+    code: i32,
+    /// What it printed (Windows' windowless CLI shows its own dialogs instead).
+    output: String,
 }
 
 /// CLI operations the UI may request. Arguments are built here, never taken raw from
@@ -128,7 +163,6 @@ enum CliCommand {
     Protocol {
         on: bool,
     },
-    Identify,
 }
 
 /// `locales` next to the executable. Debug builds fall back to the repository's
@@ -157,13 +191,8 @@ fn read_locale(app: &App, code: &str) -> Result<HashMap<String, String>, String>
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
-fn issues_have_errors(issues: &[Issue]) -> bool {
-    validate::has_errors(issues)
-}
-
 #[tauri::command]
 fn platform(app: State<App>) -> Platform {
-    let build = dg_win::system::windows_build();
     let mut languages = vec![Language {
         code: "en".into(),
         name: "English".into(),
@@ -189,11 +218,13 @@ fn platform(app: State<App>) -> Platform {
         languages.extend(found);
     }
     Platform {
-        mica: build >= 22000,
-        build,
+        os: sys::OS,
+        mica: sys::mica(),
+        build: sys::build(),
+        system: sys::description(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         languages,
-        system_language: dg_win::system::ui_language(),
+        system_language: sys::ui_language(),
     }
 }
 
@@ -221,7 +252,7 @@ fn load_config(app: State<App>) -> Result<ConfigState, String> {
 #[tauri::command]
 fn save_config(app: State<App>, config: Config) -> Result<SaveResult, String> {
     let issues = validate::validate(&config);
-    if issues_have_errors(&issues) {
+    if validate::has_errors(&issues) {
         return Ok(SaveResult {
             saved: false,
             issues,
@@ -240,7 +271,7 @@ fn import_config(app: State<App>, text: String) -> Result<SaveResult, String> {
     save_config(app, config)
 }
 
-/// Writes a copy next to the config and shows it in Explorer.
+/// Writes a copy next to the config and shows it in the file manager.
 #[tauri::command]
 fn export_config(app: State<App>) -> Result<String, String> {
     let loaded = store::load(&app.paths.config_file).map_err(|e| e.to_string())?;
@@ -256,116 +287,91 @@ fn export_config(app: State<App>) -> Result<String, String> {
         .unwrap_or_default();
     let path = dir.join(format!("config.export-{stamp}.json"));
     store::write_json(&path, &loaded.config).map_err(|e| e.to_string())?;
-    let _ = Command::new("explorer.exe")
-        .arg(format!("/select,{}", path.display()))
-        .spawn();
+    sys::reveal(&path);
     Ok(path.display().to_string())
 }
 
 #[tauri::command]
 fn open_logs(app: State<App>) -> Result<(), String> {
     std::fs::create_dir_all(&app.paths.logs_dir).map_err(|e| e.to_string())?;
-    Command::new("explorer.exe")
-        .arg(&app.paths.logs_dir)
-        .spawn()
-        .map(drop)
-        .map_err(|e| e.to_string())
+    sys::open_folder(&app.paths.logs_dir)
 }
 
 #[tauri::command]
-fn probe_hotkey(chord: String) -> HotkeyProbe {
-    match Chord::parse(&chord) {
-        Ok(c) => {
-            let reserved = c.reserved_by_windows().map(str::to_string);
-            HotkeyProbe {
-                valid: true,
-                canonical: Some(c.to_string()),
-                error: None,
-                free: Some(
-                    reserved.is_none() && dg_win::system::hotkey_is_free(c.modifiers.bits(), c.vk),
-                ),
-                reserved,
-                known: c
-                    .known_conflicts()
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect(),
-                agent_running: dg_win::agent::is_running(),
+async fn probe_hotkey(app: State<'_, App>, chord: String) -> Result<HotkeyProbe, String> {
+    let paths = app.paths.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let agent_running = sys::agent_running(&paths);
+        let chord = match Chord::parse(&chord) {
+            Ok(c) => c,
+            Err(e) => {
+                return HotkeyProbe {
+                    valid: false,
+                    canonical: None,
+                    error: Some(e.to_string()),
+                    free: None,
+                    reserved: None,
+                    known: Vec::new(),
+                    ours: None,
+                    agent_running,
+                }
             }
+        };
+        let probe = sys::probe(&chord);
+        HotkeyProbe {
+            valid: probe.error.is_none(),
+            canonical: Some(chord.to_string()),
+            free: probe.error.is_none().then_some(probe.free),
+            error: probe.error,
+            reserved: probe.reserved,
+            known: probe.known,
+            ours: probe.ours,
+            agent_running,
         }
-        Err(e) => HotkeyProbe {
-            valid: false,
-            canonical: None,
-            error: Some(e.to_string()),
-            free: None,
-            reserved: None,
-            known: Vec::new(),
-            agent_running: dg_win::agent::is_running(),
-        },
-    }
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn integration_state() -> Integration {
-    Integration {
-        startup: dg_win::integration::startup_enabled(),
-        protocol: dg_win::integration::protocol_command().is_some(),
-    }
+    sys::integration()
 }
 
 /// Connected and active displays, mapped to config monitor keys, plus the group on
 /// screen now.
 #[tauri::command]
 async fn display_status(config: Config) -> Result<(Status, Option<Uuid>), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let backend = WinBackend::new();
-        let engine = Engine::new(&backend);
-        let status = engine.status(&config).map_err(|e| e.to_string())?;
-        let ids: Vec<Uuid> = config.groups.iter().map(|g| g.id).collect();
-        let current = engine.current_group(&config, &ids).ok().flatten();
-        Ok((status, current))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || sys::display_status(&config))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
-/// Modes offered by a monitor that is currently on (Windows only lists modes of
-/// active displays).
+/// Modes a monitor offers. Windows lists them only for displays that are on; GNOME
+/// for every connected one. `"off"` (translated by the page) when it cannot be listed.
 #[tauri::command]
 async fn monitor_modes(config: Config, monitor: String) -> Result<Vec<ModeOption>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let entry = config
-            .monitors
-            .get(&monitor)
-            .ok_or("unknown monitor")?
-            .clone();
-        let backend = WinBackend::new();
-        let active = backend.query(Scope::Active).map_err(|e| e.to_string())?;
-        let observed: Vec<_> = active
-            .targets
-            .iter()
-            .map(dg_engine::observe::observe)
-            .collect();
-        // "off" is translated by the page.
-        let m = match_monitor(&entry.identity, &observed).map_err(|_| "off".to_string())?;
-        let target = active.targets[m.index].target;
-        let mut modes: Vec<ModeOption> = backend
-            .list_modes(target)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .filter(|d| d.refresh_hz > 1 && d.width >= 640)
-            .map(|d| ModeOption {
-                width: d.width.max(d.height),
-                height: d.width.min(d.height),
-                refresh_hz: d.refresh_hz,
-            })
-            .collect();
+        let mut modes = sys::monitor_modes(&config, &monitor)?;
+        modes.retain(|m| m.refresh_hz > 1 && m.width >= 640);
         modes.sort_by(|a, b| b.cmp(a));
         modes.dedup();
         Ok(modes)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn cli_output(output: &std::process::Output) -> String {
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    let err = String::from_utf8_lossy(&output.stderr);
+    if !err.trim().is_empty() {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(err.trim());
+    }
+    text.trim().to_string()
 }
 
 #[tauri::command]
@@ -397,30 +403,20 @@ async fn run_cli(app: State<'_, App>, command: CliCommand) -> Result<CliResult, 
         }
         CliCommand::Startup { on } => args.extend(["startup".into(), toggle(on)]),
         CliCommand::Protocol { on } => args.extend(["protocol".into(), toggle(on)]),
-        CliCommand::Identify => args.push("identify".into()),
     }
-    let exe = app.exe_dir.join("displaygroups.exe");
+    let exe = app.exe_dir.join(sys::CLI);
     let config = app.paths.config_file.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let output = Command::new(&exe)
-            .args(&args)
-            .arg("--config")
-            .arg(&config)
-            .creation_flags(CREATE_NO_WINDOW)
+        let mut command = Command::new(&exe);
+        command.args(&args).arg("--config").arg(&config);
+        sys::no_console(&mut command);
+        let output = command
             .output()
             .map_err(|e| format!("{}: {e}", exe.display()))?;
-        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-        let err = String::from_utf8_lossy(&output.stderr);
-        if !err.trim().is_empty() {
-            if !text.is_empty() {
-                text.push('\n');
-            }
-            text.push_str(err.trim());
-        }
         Ok(CliResult {
             ok: output.status.success(),
             code: output.status.code().unwrap_or(-1),
-            output: text.trim().to_string(),
+            output: cli_output(&output),
         })
     })
     .await
@@ -431,90 +427,53 @@ fn toggle(on: bool) -> String {
     if on { "on" } else { "off" }.to_string()
 }
 
-/// "Test" / "Apply now": runs the real switch with its countdown through
-/// `displaygroupsw.exe` (which shows its own error dialogs) and returns its exit code
-/// once the switch is kept or reverted, so the page can say what happened.
+/// "Test" / "Apply now": runs the real switch through the CLI and returns once it is
+/// kept or reverted (Windows' countdown) or applied (GNOME asks by itself afterwards),
+/// so the page can say what happened.
 #[tauri::command]
-async fn apply_group(app: State<'_, App>, id: Uuid) -> Result<i32, String> {
-    let exe = app.exe_dir.join("displaygroupsw.exe");
+async fn apply_group(app: State<'_, App>, id: Uuid) -> Result<ApplyResult, String> {
+    let exe = app.exe_dir.join(sys::CLI_SWITCH);
     tauri::async_runtime::spawn_blocking(move || {
-        Command::new(&exe)
+        let output = Command::new(&exe)
             .args(["apply", &id.to_string()])
-            .status()
-            .map(|s| s.code().unwrap_or(-1))
-            .map_err(|e| format!("{}: {e}", exe.display()))
+            .output()
+            .map_err(|e| format!("{}: {e}", exe.display()))?;
+        Ok(ApplyResult {
+            code: output.status.code().unwrap_or(-1),
+            output: cli_output(&output),
+        })
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-/// Window class of the settings app's hidden event window (not the agent's class, so
-/// `dg_win::agent::is_running` is not fooled).
-const WATCH_WINDOW_CLASS: &str = "DisplayGroups.Settings.Watch";
-const TIMER_DISPLAYS: usize = 1;
-
-/// Tells the page when Windows' displays change (a display turned on or off,
-/// connected, removed, rearranged or set to another mode) and when the config file
-/// changes on disk, so the window shows what Windows has now.
-fn watch_changes(app: tauri::AppHandle, config_dir: Option<PathBuf>) {
-    if let Some(dir) = config_dir {
-        let handle = app.clone();
-        let _ = dg_win::system::watch_dir(&dir, move || {
-            let _ = handle.emit("config-changed", ());
-        });
-    }
-    let _ = std::thread::Builder::new()
-        .name("display-watch".into())
-        .spawn(move || {
-            let Ok(window) = AgentWindow::create_with(WATCH_WINDOW_CLASS, "DisplayGroups Settings")
-            else {
-                return;
-            };
-            window.run(|event| {
-                match event {
-                    // Windows sends several messages per change; report once it settles.
-                    AgentEvent::DisplayChanged | AgentEvent::DeviceChanged => {
-                        window.set_timer(TIMER_DISPLAYS, 700)
-                    }
-                    AgentEvent::Timer(TIMER_DISPLAYS) => {
-                        window.kill_timer(TIMER_DISPLAYS);
-                        let _ = app.emit("displays-changed", ());
-                    }
-                    _ => {}
-                }
-                true
-            });
-        });
+/// "Identify": each display shows its number and name for a few seconds.
+#[tauri::command]
+async fn identify(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || sys::identify(&app, 3))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
-/// Programs with a window open right now, to pick one for a trigger (lower-case
-/// executable names, without Windows shell processes).
+/// Programs to pick from for a trigger (lower-case names, like `steam.exe`).
 #[tauri::command]
 async fn running_programs() -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(dg_win::detect::programs_with_windows)
+    tauri::async_runtime::spawn_blocking(sys::running_programs)
         .await
         .map_err(|e| e.to_string())
 }
 
-/// "Choose file…" for a group icon: the Windows Open dialog, then the file is stored in
-/// the icons folder as `.ico`. Returns the value for `group.icon`; `None` if cancelled.
-#[tauri::command]
-fn pick_icon(
-    app: State<App>,
-    window: tauri::WebviewWindow,
-    title: String,
-    filter: String,
-) -> Result<Option<String>, String> {
-    let owner = window.hwnd().map(|h| h.0 as isize).unwrap_or(0);
-    let Some(source) = dg_win::ui::pick_file(owner, &title, &filter, "*.ico;*.png")? else {
-        return Ok(None);
-    };
-    let (file, ico) = dg_win::icons::import_file(&source)?;
-    store::write_atomic(&app.paths.icons_dir.join(&file), &ico).map_err(|e| e.to_string())?;
-    Ok(Some(format!("file:{file}")))
+/// The media type of a custom icon file, from its extension.
+fn image_type(file: &str) -> &'static str {
+    let ext = file.rsplit('.').next().unwrap_or_default();
+    match ext.to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "svg" => "image/svg+xml",
+        _ => "image/x-icon",
+    }
 }
 
-/// A custom group icon (`file:…`) as a `data:` URL; built-in icons are font glyphs.
+/// A custom group icon (`file:…`) as a `data:` URL; built-in icons are glyphs.
 #[tauri::command]
 fn icon_image(app: State<App>, icon: String) -> Result<String, String> {
     let name = icon.strip_prefix("file:").ok_or("not a custom icon")?;
@@ -523,7 +482,11 @@ fn icon_image(app: State<App>, icon: String) -> Result<String, String> {
         .ok_or("invalid icon name")?;
     let path = app.paths.icons_dir.join(file);
     let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(format!("data:image/x-icon;base64,{}", base64(&bytes)))
+    Ok(format!(
+        "data:{};base64,{}",
+        image_type(&file.to_string_lossy()),
+        base64(&bytes)
+    ))
 }
 
 fn base64(bytes: &[u8]) -> String {
@@ -545,40 +508,24 @@ fn base64(bytes: &[u8]) -> String {
     out
 }
 
-/// Built-in icon names and their glyphs, so the UI shows the same symbols as the OSD.
+/// Built-in icon names and their glyphs (`glyph|#rrggbb`), so the UI shows the same
+/// symbols as the OSD.
 #[tauri::command]
 fn builtin_icons() -> BTreeMap<String, String> {
-    dg_win::icons::BUILTIN
-        .iter()
-        .map(|name| {
-            let style = dg_win::icons::builtin_style(name);
-            (
-                (*name).to_string(),
-                format!(
-                    "{}|#{:02x}{:02x}{:02x}",
-                    style.glyph, style.color.0, style.color.1, style.color.2
-                ),
-            )
-        })
-        .collect()
+    dg_model::icons::builtin_table().into_iter().collect()
 }
 
-/// Hotkeys, the tray and the OSD live in the agent. Opening the settings app (for
-/// example from the installer's last page) starts it if it is not running, so the
-/// hotkeys being edited are live. Debug builds never start it, and neither does
-/// `DISPLAYGROUPS_NO_AGENT=1`, so working on the UI does not arm real hotkeys.
-fn start_agent(exe_dir: &std::path::Path) {
-    if cfg!(debug_assertions) || std::env::var_os("DISPLAYGROUPS_NO_AGENT").is_some() {
-        return;
-    }
-    let agent = exe_dir.join("displaygroupsw.exe");
-    if dg_win::agent::is_running() || !agent.is_file() {
-        return;
-    }
-    let _ = Command::new(agent)
-        .arg("agent")
-        .current_dir(exe_dir)
-        .spawn();
+/// `--identify [--seconds N]`: only show the display labels, then quit (what
+/// `displaygroups identify` runs on Linux).
+fn identify_only(args: &[String]) -> Option<u32> {
+    args.iter().any(|a| a == "--identify").then(|| {
+        args.iter()
+            .position(|a| a == "--seconds")
+            .and_then(|i| args.get(i + 1))
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(3)
+            .clamp(1, 30)
+    })
 }
 
 fn main() {
@@ -589,29 +536,37 @@ fn main() {
     let paths = match AppPaths::resolve(Some(&exe_dir)) {
         Ok(p) => p,
         Err(e) => {
-            dg_win::ui::show_error("DisplayGroups", &e.to_string());
+            sys::show_error("DisplayGroups", &e.to_string());
             return;
         }
     };
-    start_agent(&exe_dir);
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let labels_only = identify_only(&args);
+    if labels_only.is_none() {
+        sys::start_agent(&exe_dir, &paths);
+    }
     tauri::Builder::default()
         .manage(App { paths, exe_dir })
-        .setup(|app| {
-            if dg_win::system::windows_build() >= 22000 {
-                if let Some(window) = app.get_webview_window("main") {
-                    let effects = tauri::window::EffectsBuilder::new()
-                        .effect(tauri::window::Effect::Mica)
-                        .build();
-                    let _ = window.set_effects(effects);
-                }
+        .setup(move |app| {
+            if let Some(seconds) = labels_only {
+                sys::identify(app.handle(), seconds)?;
+                return Ok(());
             }
-            let config_dir = app
-                .state::<App>()
-                .paths
-                .config_file
-                .parent()
-                .map(PathBuf::from);
-            watch_changes(app.handle().clone(), config_dir);
+            // The main window is described in tauri.conf.json but created here, so
+            // `--identify` can run without it.
+            let config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "main")
+                .cloned()
+                .ok_or("no main window in the configuration")?;
+            let window =
+                tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?.build()?;
+            sys::decorate(&window);
+            let config_file = app.state::<App>().paths.config_file.clone();
+            sys::watch_changes(app.handle().clone(), config_file);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -628,13 +583,14 @@ fn main() {
             monitor_modes,
             run_cli,
             apply_group,
+            identify,
             builtin_icons,
-            pick_icon,
+            sys::pick_icon,
             icon_image,
             running_programs,
         ])
         .run(tauri::generate_context!())
-        .unwrap_or_else(|e| dg_win::ui::show_error("DisplayGroups", &e.to_string()));
+        .unwrap_or_else(|e| sys::show_error("DisplayGroups", &e.to_string()));
 }
 
 #[cfg(test)]
@@ -664,5 +620,27 @@ mod tests {
         assert!(!valid_language_code(""));
         assert!(!valid_language_code("..\\x"));
         assert!(!valid_language_code("ar/../../secret"));
+    }
+
+    #[test]
+    fn custom_icons_get_their_media_type() {
+        assert_eq!(image_type("custom-tv.PNG"), "image/png");
+        assert_eq!(image_type("custom-tv.svg"), "image/svg+xml");
+        assert_eq!(image_type("couch-1a2b.ico"), "image/x-icon");
+    }
+
+    #[test]
+    fn identify_mode_reads_its_seconds() {
+        let args = |s: &[&str]| s.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        assert_eq!(identify_only(&args(&[])), None);
+        assert_eq!(identify_only(&args(&["--identify"])), Some(3));
+        assert_eq!(
+            identify_only(&args(&["--identify", "--seconds", "7"])),
+            Some(7)
+        );
+        assert_eq!(
+            identify_only(&args(&["--identify", "--seconds", "99"])),
+            Some(30)
+        );
     }
 }

@@ -5,12 +5,12 @@ import { field, h, icon, ltr, numberInput, select, toggle } from "../dom";
 import { t } from "../i18n";
 import { iconTile } from "../icons";
 import { applyAndReport, saveNow, toast } from "../main";
-import { changed, dirty, monitorName, monitorNumber, reload, state } from "../state";
+import { changed, dirty, monitorName, monitorNumber, onLinux, reload, state } from "../state";
 import { layoutCanvas, makePrimary, size } from "./canvas";
 
 const modeCache = new Map<string, ModeOption[] | string>();
 
-/** Windows' displays changed: modes are listed again (a display may be on now). */
+/** The displays changed: modes are listed again (a display may be on now). */
 export function forgetModes(): void {
   modeCache.clear();
 }
@@ -31,7 +31,7 @@ function tile(iconName: string): HTMLElement {
   return iconTile(iconName);
 }
 
-/** "Choose file…": the Windows Open dialog; the file is copied into the icons folder. */
+/** "Choose file…": the system's Open dialog; the file is copied into the icons folder. */
 async function pickIcon(g: Group): Promise<void> {
   try {
     const value = await api.pickIcon(t("icons.pickTitle"), t("icons.filter"));
@@ -46,8 +46,11 @@ async function pickIcon(g: Group): Promise<void> {
 
 /** "Identify": each display shows its number and name for a few seconds. */
 async function identify(): Promise<void> {
-  const r = await api.cli({ kind: "identify" });
-  if (!r.ok) toast(r.output || t("common.failed"), "error");
+  try {
+    await api.identify();
+  } catch (e) {
+    toast(String(e) || t("common.failed"), "error");
+  }
 }
 
 function requireSaved(): boolean {
@@ -137,7 +140,7 @@ function newDisplay(g: Group, key: string): DisplaySetting {
   };
 }
 
-/** Replaces the group's displays with what Windows shows now (same group, same id). */
+/** Replaces the group's displays with what is on screen now (same group, same id). */
 async function updateFromScreen(g: Group): Promise<void> {
   if (!requireSaved()) return;
   if (!window.confirm(t("groups.updateConfirm", { name: g.name }))) return;
@@ -147,7 +150,7 @@ async function updateFromScreen(g: Group): Promise<void> {
   changed();
 }
 
-/** What Windows shows right now; kept current as displays change. */
+/** What is on screen right now; kept current as displays change. */
 function screenNow(): HTMLElement | null {
   const status = state.status;
   if (!status) return null;
@@ -364,18 +367,21 @@ function inspector(g: Group, index: number): HTMLElement {
           (v) => ((d.scalePercent = v === "" ? null : Number(v)), changed()),
         ),
       ),
-      field(
-        t("editor.hdr"),
-        select(
-          [
-            ["", t("editor.leaveAsIs")],
-            ["on", t("common.on")],
-            ["off", t("common.off")],
-          ],
-          d.hdr === null ? "" : d.hdr ? "on" : "off",
-          (v) => ((d.hdr = v === "" ? null : v === "on"), changed()),
-        ),
-      ),
+      // GNOME's display service has no HDR setting yet; a Windows value is kept as is.
+      onLinux()
+        ? null
+        : field(
+            t("editor.hdr"),
+            select(
+              [
+                ["", t("editor.leaveAsIs")],
+                ["on", t("common.on")],
+                ["off", t("common.off")],
+              ],
+              d.hdr === null ? "" : d.hdr ? "on" : "off",
+              (v) => ((d.hdr = v === "" ? null : v === "on"), changed()),
+            ),
+          ),
       field(
         t("editor.position"),
         h(
@@ -451,39 +457,49 @@ function moreOptions(g: Group): HTMLElement {
           (v) => ((g.othersPolicy = v), changed()),
         ),
       ),
-      field(t("editor.confirm"), numberInput(g.safety.confirmSeconds, (v) => ((g.safety.confirmSeconds = Math.max(0, Math.min(120, v))), changed()), { min: 0, max: 120 }), t("editor.confirmHint")),
+      onLinux()
+        ? // GNOME asks for a fixed 20 seconds; only whether it asks can be chosen.
+          field(
+            t("editor.confirm"),
+            toggle(g.safety.confirmSeconds > 0, (v) => ((g.safety.confirmSeconds = v ? 15 : 0), changed())),
+            t("editor.confirmHint"),
+          )
+        : field(t("editor.confirm"), numberInput(g.safety.confirmSeconds, (v) => ((g.safety.confirmSeconds = Math.max(0, Math.min(120, v))), changed()), { min: 0, max: 120 }), t("editor.confirmHint")),
     ),
-    h("h3", {}, t("editor.audio")),
-    h(
-      "div",
-      { class: "inspector" },
-      field(t("editor.audioSwitch"), toggle(audio.enabled, (v) => ((audio.enabled = v), changed()))),
-      field(
-        t("editor.audioEndpoint"),
-        h("input", {
-          type: "text",
-          value: audio.endpoint?.nameContains ?? "",
-          placeholder: "SAMSUNG",
-          onchange: (e: Event) => {
-            const v = (e.target as HTMLInputElement).value.trim();
-            audio.endpoint = v ? { nameContains: v } : null;
-            changed();
-          },
-        }),
-      ),
-      field(
-        t("editor.volume"),
-        h(
-          "span",
-          { class: "row" },
-          toggle(audio.volumePercent !== null, (v) => ((audio.volumePercent = v ? 50 : null), changed())),
-          audio.volumePercent !== null
-            ? h("input", { type: "range", min: 0, max: 100, value: String(audio.volumePercent), onchange: (e: Event) => ((audio.volumePercent = Number((e.target as HTMLInputElement).value)), changed()) })
-            : null,
-          audio.volumePercent !== null ? `${audio.volumePercent}%` : t("editor.leaveAsIs"),
+    // The sound output is switched on Windows only so far.
+    onLinux() ? null : h("h3", {}, t("editor.audio")),
+    onLinux()
+      ? null
+      : h(
+          "div",
+          { class: "inspector" },
+          field(t("editor.audioSwitch"), toggle(audio.enabled, (v) => ((audio.enabled = v), changed()))),
+          field(
+            t("editor.audioEndpoint"),
+            h("input", {
+              type: "text",
+              value: audio.endpoint?.nameContains ?? "",
+              placeholder: "SAMSUNG",
+              onchange: (e: Event) => {
+                const v = (e.target as HTMLInputElement).value.trim();
+                audio.endpoint = v ? { nameContains: v } : null;
+                changed();
+              },
+            }),
+          ),
+          field(
+            t("editor.volume"),
+            h(
+              "span",
+              { class: "row" },
+              toggle(audio.volumePercent !== null, (v) => ((audio.volumePercent = v ? 50 : null), changed())),
+              audio.volumePercent !== null
+                ? h("input", { type: "range", min: 0, max: 100, value: String(audio.volumePercent), onchange: (e: Event) => ((audio.volumePercent = Number((e.target as HTMLInputElement).value)), changed()) })
+                : null,
+              audio.volumePercent !== null ? `${audio.volumePercent}%` : t("editor.leaveAsIs"),
+            ),
+          ),
         ),
-      ),
-    ),
     h("h3", {}, t("editor.actions")),
     h(
       "div",

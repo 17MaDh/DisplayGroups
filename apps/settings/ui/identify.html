@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DisplayGroups</title>
+    <style>
+      /* One display's label during "Identify" (Linux): a see-through full-screen window
+         with a card in the middle, like the Windows labels. A click or Esc closes it. */
+      html,
+      body {
+        margin: 0;
+        block-size: 100%;
+        background: transparent;
+        overflow: hidden;
+        cursor: default;
+        user-select: none;
+        font-family: system-ui, "Ubuntu", "Cantarell", sans-serif;
+      }
+      body {
+        display: grid;
+        place-items: center;
+      }
+      .card {
+        display: grid;
+        justify-items: center;
+        gap: 4px;
+        min-inline-size: 280px;
+        padding: 28px 44px 32px;
+        border-radius: 20px;
+        background: rgba(24, 24, 27, 0.88);
+        color: #fff;
+        box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+        animation: in 150ms ease-out;
+      }
+      .number {
+        font-size: 120px;
+        line-height: 1;
+        font-weight: 700;
+      }
+      .name {
+        font-size: 24px;
+        font-weight: 600;
+      }
+      .mode {
+        font-size: 16px;
+        opacity: 0.75;
+        direction: ltr;
+        unicode-bidi: isolate;
+      }
+      @keyframes in {
+        from {
+          opacity: 0;
+          transform: scale(0.96);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .card {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card" role="status">
+      <div class="number"></div>
+      <div class="name" dir="auto"></div>
+      <div class="mode"></div>
+    </div>
+    <script type="module" src="./identify.ts"></script>
+  </body>
+</html>

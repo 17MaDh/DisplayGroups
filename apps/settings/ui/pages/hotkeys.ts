@@ -1,9 +1,11 @@
-// Hotkeys: record a chord, check it live against other programs, pick the action.
+// Hotkeys: record a chord, check it live against other programs (Windows) or GNOME's
+// own shortcuts (Linux, where each hotkey becomes a GNOME custom shortcut), pick the
+// action.
 
 import { api, type Hotkey, type HotkeyAction, type HotkeyProbe } from "../api";
 import { h, icon, select, toggle } from "../dom";
 import { t } from "../i18n";
-import { changed, state } from "../state";
+import { changed, onLinux, state } from "../state";
 
 const probes = new Map<string, HotkeyProbe | "pending">();
 let recording: Hotkey | null = null;
@@ -57,7 +59,7 @@ function onRecordKey(e: KeyboardEvent): void {
   }
   const key = keyName(e.code);
   if (!key) return; // a modifier on its own: keep waiting
-  const parts = [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && "Win", key].filter(Boolean);
+  const parts = [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && (onLinux() ? "Super" : "Win"), key].filter(Boolean);
   recording.chord = parts.join("+");
   stopRecording();
 }
@@ -81,6 +83,9 @@ function status(chord: string): HTMLElement {
   if (!cached || cached === "pending") return h("span", { class: "badge" }, "…");
   if (!cached.valid) return h("span", { class: "badge bad" }, cached.error ?? "?");
   if (cached.reserved) return h("span", { class: "badge bad" }, t("hotkeys.reserved", { what: cached.reserved }));
+  // Linux: the system says whether it is one of our GNOME shortcuts already. A clash
+  // with GNOME's own shortcuts still wins (GNOME runs its own one).
+  if (cached.ours && cached.free) return h("span", { class: "badge ok" }, t("hotkeys.ours"));
   if (cached.free) {
     return cached.known.length
       ? h("span", { class: "badge warn", title: cached.known.join(", ") }, t("hotkeys.takenBy", { owner: cached.known.join(", ") }))
@@ -88,7 +93,7 @@ function status(chord: string): HTMLElement {
   }
   // Held by someone. It is ours only if the agent runs and the chord is already saved.
   const saved = (JSON.parse(state.saved) as { hotkeys?: { chord: string }[] }).hotkeys ?? [];
-  const ours = cached.agentRunning && saved.some((s) => s.chord.replace(/\s/g, "").toLowerCase() === (cached.canonical ?? "").toLowerCase());
+  const ours = cached.ours === null && cached.agentRunning && saved.some((s) => s.chord.replace(/\s/g, "").toLowerCase() === (cached.canonical ?? "").toLowerCase());
   const hint = cached.known.length ? ` (${t("hotkeys.takenBy", { owner: cached.known.join(", ") })})` : "";
   return h("span", { class: `badge ${ours ? "ok" : "bad"}` }, ours ? t("hotkeys.ours") : t("hotkeys.taken") + hint);
 }
@@ -180,11 +185,13 @@ export function renderHotkeys(): HTMLElement {
           groupPicker(hk.action),
         ),
       ),
-      h(
-        "td",
-        {},
-        h("label", { class: "row", title: lockScreen ? "" : t("hotkeys.lockScreenOff") }, toggle(hk.onLockScreen, (v) => ((hk.onLockScreen = v), changed()), !lockScreen), t("hotkeys.lockScreen")),
-      ),
+      onLinux()
+        ? null
+        : h(
+            "td",
+            {},
+            h("label", { class: "row", title: lockScreen ? "" : t("hotkeys.lockScreenOff") }, toggle(hk.onLockScreen, (v) => ((hk.onLockScreen = v), changed()), !lockScreen), t("hotkeys.lockScreen")),
+          ),
       h(
         "td",
         {},
@@ -206,7 +213,7 @@ export function renderHotkeys(): HTMLElement {
       ? h(
           "table",
           { class: "list" },
-          h("thead", {}, h("tr", {}, h("th", {}, t("hotkeys.chord")), h("th", {}, t("hotkeys.status")), h("th", {}, t("hotkeys.action")), h("th", {}), h("th", {}))),
+          h("thead", {}, h("tr", {}, h("th", {}, t("hotkeys.chord")), h("th", {}, t("hotkeys.status")), h("th", {}, t("hotkeys.action")), onLinux() ? null : h("th", {}), h("th", {}))),
           h("tbody", {}, ...rows),
         )
       : h("p", { class: "muted" }, t("hotkeys.none")),
@@ -217,7 +224,8 @@ export function renderHotkeys(): HTMLElement {
         disabled: ids.length === 0,
         onclick: () => {
           state.config.hotkeys.push({
-            chord: "Ctrl+Alt+F11",
+            // GNOME keeps Ctrl+Alt+F1…F12 for switching to the text consoles.
+            chord: onLinux() ? "Super+Shift+F11" : "Ctrl+Alt+F11",
             action: ids.length >= 2 ? { type: "toggle", groups: ids.slice(0, 2) } : { type: "apply", group: ids[0] },
             onLockScreen: false,
           });

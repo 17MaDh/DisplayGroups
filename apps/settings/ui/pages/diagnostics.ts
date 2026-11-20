@@ -1,4 +1,4 @@
-// Diagnostics: versions, paths, logs, import/export, what Windows sees, config problems.
+// Diagnostics: versions, paths, logs, import/export, what the system sees, config problems.
 
 import { api } from "../api";
 import { h, icon, ltr } from "../dom";
@@ -43,7 +43,7 @@ export function renderDiagnostics(): HTMLElement {
       h(
         "div",
         {},
-        t("diagnostics.version", { version: state.platform.version, build: state.platform.build }) +
+        t("diagnostics.version", { version: state.platform.version, build: state.platform.build, system: state.platform.system }) +
           (state.portable ? ` · ${t("diagnostics.portable")}` : ""),
       ),
       h("div", { class: "muted", style: "user-select:text" }, state.configPath),

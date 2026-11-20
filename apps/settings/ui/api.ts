@@ -116,8 +116,13 @@ export interface ConfigState {
 }
 
 export interface Platform {
+  /** The system the app runs on; the page hides what it does not support. */
+  os: "windows" | "linux";
   mica: boolean;
+  /** Windows build number (0 elsewhere). */
   build: number;
+  /** The system's name for Diagnostics, e.g. "Ubuntu 24.04.1 LTS · GNOME". */
+  system: string;
   version: string;
   /** English first, then each `locales\<code>.json`, named in its own language. */
   languages: { code: string; name: string }[];
@@ -158,6 +163,8 @@ export interface HotkeyProbe {
   free: boolean | null;
   reserved: string | null;
   known: string[];
+  /** DisplayGroups holds this chord now (Linux: it is one of our GNOME shortcuts). */
+  ours: boolean | null;
   agentRunning: boolean;
 }
 
@@ -165,6 +172,12 @@ export interface ModeOption {
   width: number;
   height: number;
   refreshHz: number;
+}
+
+/** "Test": the CLI's exit code (0 kept, 3 reverted) and what it printed. */
+export interface ApplyResult {
+  code: number;
+  output: string;
 }
 
 export interface CliResult {
@@ -178,8 +191,7 @@ export type CliCommand =
   | { kind: "validate"; id: string }
   | { kind: "shortcut"; id: string; desktop: boolean; startMenu: boolean }
   | { kind: "startup"; on: boolean }
-  | { kind: "protocol"; on: boolean }
-  | { kind: "identify" };
+  | { kind: "protocol"; on: boolean };
 
 export const api = {
   platform: () => invoke<Platform>("platform"),
@@ -194,14 +206,16 @@ export const api = {
   displayStatus: (config: Config) => invoke<[Status, string | null]>("display_status", { config }),
   monitorModes: (config: Config, monitor: string) => invoke<ModeOption[]>("monitor_modes", { config, monitor }),
   cli: (command: CliCommand) => invoke<CliResult>("run_cli", { command }),
-  /** Switches for real (with the countdown) and returns the CLI exit code once done. */
-  applyGroup: (id: string) => invoke<number>("apply_group", { id }),
+  /** Switches for real and returns once it is kept or reverted (Windows) or applied (GNOME asks itself). */
+  applyGroup: (id: string) => invoke<ApplyResult>("apply_group", { id }),
+  /** Shows each display's number and name on that display for a few seconds. */
+  identify: () => invoke<void>("identify"),
   builtinIcons: () => invoke<Record<string, string>>("builtin_icons"),
-  /** Windows "Open" dialog for a .ico/.png; returns the value for `group.icon`, or null. */
+  /** The system's "Open" dialog for a picture; returns the value for `group.icon`, or null. */
   pickIcon: (title: string, filter: string) => invoke<string | null>("pick_icon", { title, filter }),
   /** A custom (`file:`) icon as a data: URL. */
   iconImage: (icon: string) => invoke<string>("icon_image", { icon }),
-  /** Programs with a window open now (lower-case .exe names), for triggers. */
+  /** Programs running now (lower-case names such as steam.exe), for triggers. */
   runningPrograms: () => invoke<string[]>("running_programs"),
 };
 

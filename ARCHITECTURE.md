@@ -143,7 +143,7 @@
 | D6 | v1.0 additions: theme switcher, flash-free launch, motion, i18n/RTL readiness, OSD, Duplicate Group, per-group volume, pre/post-switch actions, `displaygroups://` URI, disconnect auto-fallback | Approved (§9–§11) |
 | D7 | Deferred to v1.1: window-position restore, automatic triggers, DDC/CI brightness, auto-updater | Planned in §15 |
 | D8 | v1.1 choices (2026-11-19). **Order:** automatic switching first, then window positions, DDC/CI, and the update notice last. **Triggers:** a program starting (switch back when it ends) and a game controller connecting. **Windows:** saved automatically per group. **Updates:** notice only, off by default; never downloads or installs | Approved (§15); §15.1 done |
-| D9 | Linux (2026-11-19). **Scope:** a full port to Ubuntu GNOME (Wayland and X11) through Mutter's DisplayConfig D-Bus API, in phases L1–L4. **Build:** WSL Ubuntu 24.04 on the development PC. **Test:** an Ubuntu GNOME VM | Approved (§16); L1 and L2 done |
+| D9 | Linux (2026-11-19). **Scope:** a full port to Ubuntu GNOME (Wayland and X11) through Mutter's DisplayConfig D-Bus API, in phases L1–L4. **Build:** WSL Ubuntu 24.04 on the development PC. **Test:** an Ubuntu GNOME VM | Approved (§16); L1–L3 done |
 
 ---
 
@@ -944,15 +944,22 @@ Settings, `gnome-monitor-config` and `gnome-randr` use the same interface.
   - `plan.rs`: a group → `ApplyMonitorsConfig`, plus `extend_all`.
   - `layout.rs`.
   - `observe.rs`: identity.
-  - `dbus.rs` (Linux only): zbus, blocking.
+  - `desktop.rs`, `keybindings.rs`, `detect.rs`, `system.rs`: desktop integration, GNOME
+    shortcuts, programs and controllers, language and the agent's lock (§16.5, §16.6).
+  - `dbus.rs`, `notify.rs`, `tray.rs`, `portal.rs` (Linux only): zbus and ksni, blocking.
 
-  Everything except `dbus.rs` is pure and tested on both systems.
+  Everything except the Linux-only files is pure and tested on both systems.
 - **`apps/cli`:**
   - `common.rs`: the shared code — find and validate groups, save a capture, print list and
     status, duplicate, links, actions, the switch record.
   - `commands.rs` (Windows) and `linux.rs` (Linux) do the display work; `sys.rs` holds the
     few platform facts (language, theme, dialogs, spawning).
-  - `dg-win`, `dg-ipc` and `dg-hotkey` are Windows-only dependencies.
+  - `dg-win` and `dg-ipc` are Windows-only dependencies, `dg-gnome` Linux-only.
+- **`apps/settings`:** `main.rs` has the commands that are the same everywhere; `win.rs`
+  and `linux.rs` the display status, modes, change watching, hotkey checks, dialogs and
+  "Identify" (§16.6). The page is shared.
+- **Built-in icons** (`dg_model::icons`): names, colours and Segoe Fluent glyphs, used by
+  both systems.
 - **Paths:**
   - config: `$XDG_CONFIG_HOME/displaygroups`;
   - logs and state: `$XDG_STATE_HOME/displaygroups`;
@@ -966,21 +973,13 @@ Settings, `gnome-monitor-config` and `gnome-randr` use the same interface.
 |---|---|---|
 | **L1** | GNOME backend; the CLI on Linux: `status`, `list`, `capture`, `validate`, `apply`, `toggle`, `duplicate`, `recover [--extend]`, `uri` | **Done** |
 | **L2** | The agent and desktop integration (§16.5) | **Done**, except `identify`, moved to L3 |
-| **L3** | Settings app on Linux: see the list below | Planned |
+| **L3** | The settings app on Linux, and `identify` (§16.6) | **Done** |
 | **L4** | Packaging: see the list below | Planned |
 
-**L3, the settings app:**
-- Tauri on WebKitGTK;
-- the portal file dialog;
-- `MonitorsChanged` instead of the hidden window;
-- Windows-only options hidden;
-- `identify`: GNOME Shell only lets GNOME Settings show its monitor labels, and Wayland
-  clients cannot place windows. The settings app's own full-screen windows, one per
-  monitor, will do it.
-
 **L4, packaging:**
-- `.deb` and AppImage from the Tauri bundler (WSL, later a CI job);
-- a VM test checklist;
+- `.deb` and AppImage from the Tauri bundler (WSL, later a CI job). In an AppImage the
+  shortcuts and links must start the CLI inside it, not the settings app (`$APPIMAGE`);
+- a VM test checklist, starting with what §16.4–16.6 list as not verified yet;
 - Linux sections in README and SECURITY.md.
 
 ### 16.4 Verified so far
@@ -1023,6 +1022,10 @@ switches. Switches run on a worker thread through the CLI's own `apply`/`toggle`
   - They keep working while the agent is not running, which differs from Windows.
   - Chords are converted by `Chord::gtk_accelerator` (`Ctrl+Alt+F12` → `<Control><Alt>F12`).
     A chord GNOME has no key name for is reported.
+  - So is a chord GNOME already uses itself (`keybindings::conflicts`, added in L3), since
+    GNOME runs its own shortcut instead. On Wayland **Ctrl+Alt+F1…F12 switch to the text
+    consoles** (Mutter's `switch-to-session-N`), so the Windows default Ctrl+Alt+F12 does
+    not work there; Super+Shift with an F-key is free by default.
   - "On the lock screen" does not apply: GNOME does not run custom shortcuts while locked.
 - **Tray** (`dg_gnome::tray`, the ksni crate):
   - a StatusNotifierItem, which Ubuntu's top bar shows through its AppIndicator extension;
@@ -1078,3 +1081,76 @@ switches. Switches run on a worker thread through the CLI's own `apply`/`toggle`
   - GNOME actually running a custom shortcut;
   - a real game controller;
   - the fallback with real hot-plugs.
+
+### 16.6 The settings app on Linux (L3, as built)
+
+The same Tauri app and page as on Windows, on WebKitGTK. `main.rs` holds the commands that
+are the same everywhere (config, validation, locales, CLI actions); `linux.rs` the rest.
+The executables sit side by side: `displaygroups` (CLI and agent) and
+`displaygroups-settings`.
+
+- **Displays:** status, the group on screen and modes come from Mutter (§16.1). GNOME lists
+  modes for every connected monitor, also one that is off, so the pickers work for a TV
+  that is connected but off.
+- **Following changes:** Mutter's `MonitorsChanged` signal (700 ms quiet, then
+  `displays-changed`) replaces the hidden window, and the config file's modification time
+  is checked every second (`config-changed`). The page is the same as on Windows.
+- **Windows:** the main window is described in `tauri.conf.json` with `"create": false`
+  and created in `setup` (on both systems), so `--identify` can run without it.
+  `tauri.linux.conf.json` turns transparency off (no Mica). The app icon is
+  `icons/icon.png`, the 256 px frame of `icon.ico`.
+- **What the page hides or words differently** (`platform.os`, and `<key>@linux` strings
+  in the locale files, used instead of `<key>` there):
+  - hidden: HDR, sound output, lock-screen hotkeys, "start minimized" (the agent never
+    opens the window), and the window-title filter of triggers (Wayland does not tell
+    apps other windows' titles; a config from Windows that has one gets a warning);
+  - the countdown becomes a switch, "Ask whether to keep the new layout": GNOME asks for
+    a fixed 20 s, and off means a temporary switch (§16.1);
+  - "Test" says "GNOME asks whether to keep it" (the CLI returns at once), and shows the
+    CLI's error text when it fails;
+  - "Start with Windows" → "Start when I log in", "Start Menu" → "app grid", "Displays
+    Windows sees" → "Displays GNOME sees", and so on.
+- **Icons:** the page uses Segoe Fluent Icons code points, a font Linux does not have.
+  `ui/glyphs.ts` draws the same 20 symbols as simple 24×24 strokes, keyed by code point,
+  and `icon()` uses them when the system is not Windows.
+- **Right to left:** WebKitGTK ignores Unicode isolates in SVG text, so the layout canvas
+  sets `direction: ltr` itself (screen geometry is never mirrored anyway). HTML text
+  keeps using the isolates.
+- **Hotkeys page:** each chord is checked against GNOME's own shortcuts
+  (`gsettings list-recursively` of the window manager, shell, Mutter and media-key
+  schemas, with `<Primary>`/`<Control>`, `<Mod1>`/`<Alt>`, `<Mod4>`/`<Super>` unified) and
+  the user's other custom shortcuts. A clash names GNOME's setting, e.g.
+  `switch-to-session-12`. One of our own synced shortcuts shows "In GNOME's shortcuts".
+  The Super key is recorded as `Super`, and new hotkeys start at Super+Shift+F11.
+- **Custom icons:** "Choose file…" asks xdg-desktop-portal's `FileChooser.OpenFile`
+  (zbus; the request's `Response` signal is subscribed before asking) for a PNG, SVG or
+  ICO picture, which is copied into the icons folder as `custom-<name>`.
+- **Automatic switching:** "Show running programs" lists this user's processes from
+  `/proc` without the session's own services (helpers in a `libexec` folder, shells,
+  `gsd-*`, `xdg-*`, PipeWire, …), named as the agent matches them (`steam.exe`).
+- **The agent:** opening the app starts `displaygroups agent` when its lock is free
+  (release builds only, as on Windows).
+- **Identify** (the button, and `displaygroups identify`, which runs
+  `displaygroups-settings --identify --seconds N`): one borderless, see-through window per
+  display that is on, showing `identify.html` (a second Vite page; the number, name and
+  mode come from an initialization script). On the GTK main thread each window is moved
+  and sized to its display and asked to be full screen on it
+  (`gtk_window_fullscreen_on_monitor`), which Wayland honours. GDK's monitors are matched
+  to Mutter's by the order of their positions, since both describe the same layout in
+  different units. A click or Esc closes a label; all close after N seconds.
+- **Verified** in WSL, from the packaged build, with Mutter 46 headless (two virtual
+  monitors) on a private bus and the window on Xvfb:
+  - every page renders, in English and Arabic (right to left), with the drawn icons;
+  - the status and the group on screen, also live after a switch made from the CLI;
+  - the hotkeys page found Ctrl+Alt+F12's clash with `switch-to-session-12`, and showed the
+    other hotkey as synced by the agent that the app had started;
+  - the window-title warning, the GNOME wording, and Diagnostics with the system's name;
+  - `identify` on Mutter's own Wayland display matched both displays correctly (GDK listed
+    them in the other order) and exited after its time; the label page renders on X11;
+  - the Windows build still creates its window in code, with Mica and the glyph font.
+- **Not verified yet:**
+  - the file chooser portal (no portal backend in WSL);
+  - "Identify" on a real GNOME session, and on X11 with two monitors (Xvfb gives GTK
+    only one);
+  - the window on a HiDPI display, and GNOME's dark style following "System";
+  - the agent started by the app on a real desktop.

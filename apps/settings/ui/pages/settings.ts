@@ -1,10 +1,11 @@
-// Settings: theme, language, start-up, OSD, links, disconnect fallback, lock screen.
+// Settings: theme, language, start-up, OSD, links, disconnect fallback, lock screen
+// (Windows only, as is "start minimized").
 
 import { api } from "../api";
 import { h, numberInput, select, toggle } from "../dom";
 import { setLanguage, t } from "../i18n";
 import { themeSwitch, toast } from "../main";
-import { changed, state } from "../state";
+import { changed, onLinux, state } from "../state";
 
 function row(title: string, description: string | null, control: HTMLElement): HTMLElement {
   return h("div", { class: "setting" }, h("span", { class: "text" }, title, description ? h("small", {}, description) : null), control);
@@ -43,7 +44,8 @@ export function renderSettings(): HTMLElement {
     ),
     h("h3", {}, t("settings.startup")),
     row(t("settings.startWithWindows"), t("settings.startWithWindowsHint"), toggle(state.integration.startup, (v) => void integrationToggle("startup", v))),
-    row(t("settings.startMinimized"), t("settings.startMinimizedHint"), toggle(s.startMinimized, (v) => ((s.startMinimized = v), changed()))),
+    // The Linux agent never opens this window by itself.
+    onLinux() ? null : row(t("settings.startMinimized"), t("settings.startMinimizedHint"), toggle(s.startMinimized, (v) => ((s.startMinimized = v), changed()))),
     h("h3", {}, t("settings.switching")),
     row(t("settings.osd"), null, toggle(s.osd.enabled, (v) => ((s.osd.enabled = v), changed()))),
     row(
@@ -87,7 +89,8 @@ export function renderSettings(): HTMLElement {
       ),
     ),
     h("h3", {}, t("settings.advanced")),
-    row(t("settings.lockScreen"), t("settings.lockScreenHint"), toggle(s.lockScreenSupport, (v) => ((s.lockScreenSupport = v), changed()))),
+    // GNOME runs no custom shortcuts while the screen is locked.
+    onLinux() ? null : row(t("settings.lockScreen"), t("settings.lockScreenHint"), toggle(s.lockScreenSupport, (v) => ((s.lockScreenSupport = v), changed()))),
     row(
       t("settings.logLevel"),
       null,

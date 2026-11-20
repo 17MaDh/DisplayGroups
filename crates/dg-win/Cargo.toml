@@ -9,6 +9,7 @@ authors.workspace = true
 [dependencies]
 dg-engine.workspace = true
 dg-identity.workspace = true
+dg-model.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

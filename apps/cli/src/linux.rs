@@ -31,11 +31,6 @@ pub(crate) fn dispatch(
     command: Command,
     out: Output,
 ) -> Result<i32, CliError> {
-    let not_yet = |what: &str| {
-        Err(CliError::Usage(format!(
-            "`{what}` is not available on Linux yet (ARCHITECTURE.md §16)"
-        )))
-    };
     match command {
         Command::Apply { group, no_confirm } => {
             let group = find(&cfg, &group)?.clone();
@@ -71,8 +66,7 @@ pub(crate) fn dispatch(
         Command::Duplicate { group } => duplicate(ctx, &mut cfg, &group, out),
         Command::Recover { extend } => recover(ctx, extend, out),
         Command::Uri { url } => handle_uri(ctx, &cfg, &url, out),
-        // On GNOME, labels on each screen need the settings app's windows (phase L3).
-        Command::Identify { .. } => not_yet("identify"),
+        Command::Identify { seconds } => identify(seconds, out),
         Command::Shortcut {
             group,
             desktop,
@@ -100,6 +94,32 @@ pub(crate) fn self_exe() -> Result<PathBuf, CliError> {
         return Ok(PathBuf::from(appimage));
     }
     std::env::current_exe().map_err(|e| CliError::Config(e.to_string()))
+}
+
+/// GNOME Shell only lets GNOME Settings show its monitor labels, so the settings app
+/// draws its own: `displaygroups-settings --identify` opens one window per display and
+/// quits after `seconds`.
+fn identify(seconds: u32, out: Output) -> Result<i32, CliError> {
+    let settings = std::env::current_exe()
+        .map_err(|e| CliError::Config(e.to_string()))?
+        .with_file_name("displaygroups-settings");
+    if !settings.is_file() {
+        return Err(CliError::Config(format!(
+            "`identify` needs the settings app, {}",
+            settings.display()
+        )));
+    }
+    let status = std::process::Command::new(&settings)
+        .args(["--identify", "--seconds", &seconds.to_string()])
+        .status()
+        .map_err(|e| CliError::Config(format!("{}: {e}", settings.display())))?;
+    if !status.success() {
+        return Err(CliError::Config(format!(
+            "the settings app could not show the labels ({status})"
+        )));
+    }
+    out.line("Each display showed its number and name.");
+    Ok(EXIT_OK)
 }
 
 fn dirs() -> Result<Dirs, CliError> {
@@ -161,7 +181,7 @@ fn entry_icon(ctx: &Ctx, icon: &str) -> String {
 
 /// `--icon`: a built-in name, or a picture (.png, .svg, .ico) copied into the icons folder.
 fn import_icon(ctx: &Ctx, value: &str) -> Result<String, CliError> {
-    const BUILTIN: [&str; 5] = ["monitor", "couch", "dual", "gaming", "work"];
+    use dg_model::icons::BUILTIN;
     if let Some(name) = value.strip_prefix("builtin:") {
         if !BUILTIN.contains(&name) {
             return Err(CliError::Usage(format!(
@@ -171,14 +191,7 @@ fn import_icon(ctx: &Ctx, value: &str) -> Result<String, CliError> {
         }
         return Ok(value.to_string());
     }
-    let source = Path::new(value);
-    let file = source
-        .file_name()
-        .map(|n| format!("custom-{}", n.to_string_lossy()))
-        .ok_or_else(|| CliError::Usage(format!("{value} is not a file")))?;
-    let bytes = std::fs::read(source).map_err(|e| CliError::Usage(format!("{value}: {e}")))?;
-    store::write_atomic(&ctx.paths.icons_dir.join(&file), &bytes)?;
-    Ok(format!("file:{file}"))
+    desktop::import_icon(&ctx.paths.icons_dir, Path::new(value)).map_err(CliError::Usage)
 }
 
 fn shortcut(

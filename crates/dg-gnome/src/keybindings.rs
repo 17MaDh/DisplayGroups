@@ -7,7 +7,12 @@
 //! custom shortcuts are never touched, and they keep working when the agent is not
 //! running. `gsettings` writes them, as GNOME Settings does through the same schema.
 
+use std::path::Path;
 use std::process::Command;
+
+use dg_hotkey::Chord;
+use dg_model::{Config, HotkeyAction};
+use uuid::Uuid;
 
 pub const SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys";
 pub const ENTRY_SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding";
@@ -142,6 +147,168 @@ pub fn sync(shortcuts: &[Shortcut]) -> Result<(), String> {
     Ok(())
 }
 
+/// The GNOME custom shortcuts for the config's hotkeys, running `exe` (the CLI), and the
+/// hotkeys that cannot be one (an invalid chord, or a key GNOME has no name for).
+/// `recover_label` names the "recover" action in GNOME Settings.
+pub fn for_config(cfg: &Config, exe: &Path, recover_label: &str) -> (Vec<Shortcut>, Vec<String>) {
+    let exe = shell_quote(&exe.to_string_lossy());
+    let name_of = |id: &Uuid| {
+        cfg.group_by_id(*id)
+            .map_or_else(|| id.to_string(), |g| g.name.clone())
+    };
+    let mut shortcuts = Vec::new();
+    let mut problems = Vec::new();
+    for hotkey in &cfg.hotkeys {
+        let chord = match Chord::parse(&hotkey.chord) {
+            Ok(c) => c,
+            Err(e) => {
+                problems.push(format!("\"{}\": {e}", hotkey.chord));
+                continue;
+            }
+        };
+        let Some(binding) = chord.gtk_accelerator() else {
+            problems.push(format!("{chord}: GNOME has no name for this key"));
+            continue;
+        };
+        let (label, args) = match &hotkey.action {
+            HotkeyAction::Apply { group } => (name_of(group), format!("apply {group}")),
+            HotkeyAction::Toggle { groups } | HotkeyAction::Cycle { groups } => (
+                groups.iter().map(name_of).collect::<Vec<_>>().join(" / "),
+                format!(
+                    "toggle {}",
+                    groups
+                        .iter()
+                        .map(Uuid::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ),
+            ),
+            HotkeyAction::Recover => (recover_label.to_string(), "recover".into()),
+        };
+        shortcuts.push(Shortcut {
+            name: format!("DisplayGroups: {label}"),
+            command: format!("{exe} {args}"),
+            binding,
+        });
+    }
+    (shortcuts, problems)
+}
+
+const CTRL: u8 = 1;
+const ALT: u8 = 2;
+const SHIFT: u8 = 4;
+const SUPER: u8 = 8;
+
+/// A GTK accelerator reduced to what decides a clash: its modifiers and its key, with
+/// GNOME's spellings unified (`<Primary>` = `<Control>` = `<Ctrl>`, `<Mod1>` = `<Alt>`,
+/// `<Mod4>` = `<Super>`) and the key in lower case.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Accel {
+    mods: u8,
+    key: String,
+}
+
+pub fn parse_accelerator(text: &str) -> Option<Accel> {
+    let mut rest = text.trim();
+    let mut mods = 0;
+    while let Some(after) = rest.strip_prefix('<') {
+        let (name, tail) = after.split_once('>')?;
+        mods |= match name.to_ascii_lowercase().as_str() {
+            "primary" | "control" | "ctrl" | "ctl" => CTRL,
+            "alt" | "mod1" => ALT,
+            "shift" | "shft" => SHIFT,
+            "super" | "mod4" | "meta" | "hyper" => SUPER,
+            _ => 0,
+        };
+        rest = tail;
+    }
+    (!rest.is_empty()).then(|| Accel {
+        mods,
+        key: rest.to_ascii_lowercase(),
+    })
+}
+
+/// GNOME's built-in shortcuts: window manager, shell, Mutter (including Wayland's
+/// Ctrl+Alt+F1…F12, which switch virtual terminals) and media keys.
+const GNOME_SCHEMAS: [&str; 5] = [
+    "org.gnome.desktop.wm.keybindings",
+    "org.gnome.shell.keybindings",
+    "org.gnome.mutter.keybindings",
+    "org.gnome.mutter.wayland.keybindings",
+    SCHEMA,
+];
+
+/// The keys and accelerators in `gsettings list-recursively` output (`schema key value`
+/// lines); values that are not strings are left out.
+pub fn bindings_in(listing: &str) -> Vec<(String, Vec<String>)> {
+    listing
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, ' ');
+            let _schema = parts.next()?;
+            let key = parts.next()?;
+            let value = parts.next()?.trim();
+            if !(value.starts_with('[') || value.starts_with("@as") || value.starts_with('\'')) {
+                return None;
+            }
+            let list = parse_list(value);
+            (!list.is_empty()).then(|| (key.to_string(), list))
+        })
+        .collect()
+}
+
+fn uses(accelerators: &[String], wanted: &Accel) -> bool {
+    accelerators
+        .iter()
+        .filter_map(|a| parse_accelerator(a))
+        .any(|a| &a == wanted)
+}
+
+/// What else in GNOME already uses `binding`: its own shortcuts (by settings key, such
+/// as `switch-to-session-12`) and the user's other custom shortcuts (by name).
+/// DisplayGroups' own shortcuts are not counted.
+pub fn conflicts(binding: &str) -> Result<Vec<String>, String> {
+    let wanted = parse_accelerator(binding).ok_or_else(|| format!("not a key: {binding}"))?;
+    let mut found = Vec::new();
+    for schema in GNOME_SCHEMAS {
+        // A schema can be missing (Mutter's Wayland keys on older systems).
+        let Ok(listing) = gsettings(&["list-recursively", schema]) else {
+            continue;
+        };
+        for (key, accelerators) in bindings_in(&listing) {
+            if key != "custom-keybindings" && uses(&accelerators, &wanted) {
+                found.push(key);
+            }
+        }
+    }
+    let current = parse_list(&gsettings(&["get", SCHEMA, "custom-keybindings"])?);
+    for path in current.iter().filter(|p| !is_ours(p)) {
+        let at = format!("{ENTRY_SCHEMA}:{path}");
+        let value = |key: &str| {
+            gsettings(&["get", &at, key])
+                .map(|v| parse_list(&format!("[{v}]")).pop().unwrap_or_default())
+                .unwrap_or_default()
+        };
+        if uses(&[value("binding")], &wanted) {
+            let name = value("name");
+            found.push(if name.is_empty() { path.clone() } else { name });
+        }
+    }
+    found.dedup();
+    Ok(found)
+}
+
+/// Whether one of DisplayGroups' own shortcuts in GNOME uses `binding`.
+pub fn is_ours_now(binding: &str) -> bool {
+    let Some(wanted) = parse_accelerator(binding) else {
+        return false;
+    };
+    read().is_ok_and(|ours| {
+        ours.iter()
+            .any(|s| uses(std::slice::from_ref(&s.binding), &wanted))
+    })
+}
+
 /// Our shortcuts as GNOME has them now (for tests and diagnostics).
 pub fn read() -> Result<Vec<Shortcut>, String> {
     let current = parse_list(&gsettings(&["get", SCHEMA, "custom-keybindings"])?);
@@ -195,6 +362,80 @@ mod tests {
             ]
         );
         assert!(!is_ours("/elsewhere/displaygroups-0/"));
+    }
+
+    #[test]
+    fn hotkeys_become_gnome_shortcuts() {
+        let desk = Uuid::new_v4();
+        let couch = Uuid::new_v4();
+        let cfg: Config = serde_json::from_value(serde_json::json!({
+            "schemaVersion": 1,
+            "groups": [
+                { "id": desk, "name": "Desktop", "displays": [] },
+                { "id": couch, "name": "Couch", "displays": [] }
+            ],
+            "hotkeys": [
+                { "chord": "Ctrl+Alt+F12", "action": { "type": "toggle", "groups": [desk, couch] } },
+                { "chord": "Win+Shift+R", "action": { "type": "recover" } },
+                { "chord": "Ctrl+Nope", "action": { "type": "apply", "group": desk } }
+            ]
+        }))
+        .unwrap();
+        let exe = Path::new("/opt/Display Groups/displaygroups");
+        let (shortcuts, problems) = for_config(&cfg, exe, "Recover");
+        assert_eq!(shortcuts.len(), 2);
+        assert_eq!(shortcuts[0].binding, "<Control><Alt>F12");
+        assert_eq!(shortcuts[0].name, "DisplayGroups: Desktop / Couch");
+        assert_eq!(
+            shortcuts[0].command,
+            format!("'/opt/Display Groups/displaygroups' toggle {desk} {couch}")
+        );
+        assert_eq!(shortcuts[1].binding, "<Shift><Super>r");
+        assert_eq!(shortcuts[1].name, "DisplayGroups: Recover");
+        assert!(shortcuts[1].command.ends_with(" recover"));
+        assert_eq!(problems.len(), 1);
+    }
+
+    #[test]
+    fn accelerators_compare_across_gnome_spellings() {
+        let ours = parse_accelerator("<Control><Alt>F12").unwrap();
+        assert_eq!(parse_accelerator("<Primary><Alt>F12"), Some(ours.clone()));
+        assert_eq!(parse_accelerator("<Alt><Ctrl>f12"), Some(ours.clone()));
+        assert_ne!(parse_accelerator("<Primary><Alt>F11"), Some(ours));
+        assert_eq!(parse_accelerator("<Mod4>L"), parse_accelerator("<Super>l"));
+        assert_eq!(parse_accelerator("<Super>"), None);
+        assert_eq!(parse_accelerator(""), None);
+    }
+
+    #[test]
+    fn gnome_bindings_are_read_from_gsettings_listings() {
+        let listing = "\
+org.gnome.mutter.wayland.keybindings switch-to-session-12 ['<Primary><Alt>F12']
+org.gnome.mutter.wayland.keybindings restore-shortcuts @as []
+org.gnome.desktop.wm.keybindings switch-applications ['<Super>Tab', '<Alt>Tab']
+org.gnome.settings-daemon.plugins.media-keys volume-step 6
+org.gnome.settings-daemon.plugins.media-keys screensaver-static 'XF86ScreenSaver'";
+        let bindings = bindings_in(listing);
+        assert_eq!(
+            bindings,
+            vec![
+                (
+                    "switch-to-session-12".to_string(),
+                    vec!["<Primary><Alt>F12".to_string()]
+                ),
+                (
+                    "switch-applications".to_string(),
+                    vec!["<Super>Tab".to_string(), "<Alt>Tab".to_string()]
+                ),
+                (
+                    "screensaver-static".to_string(),
+                    vec!["XF86ScreenSaver".to_string()]
+                ),
+            ]
+        );
+        let wanted = parse_accelerator("<Control><Alt>F12").unwrap();
+        assert!(uses(&bindings[0].1, &wanted));
+        assert!(!uses(&bindings[1].1, &wanted));
     }
 
     #[test]

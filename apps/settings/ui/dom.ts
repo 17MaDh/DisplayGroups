@@ -1,5 +1,7 @@
 // A tiny element builder: h("button", { class: "btn", onclick: fn }, "Save").
 
+import { glyphSvg } from "./glyphs";
+
 type Child = Node | string | number | null | undefined | false;
 type Props = Record<string, unknown>;
 
@@ -64,9 +66,18 @@ export function ltr(text: string): string {
   return `⁦${text}⁩`;
 }
 
-/** A Segoe Fluent Icons glyph. */
+let drawnGlyphs = false;
+
+/** Systems without the Segoe Fluent Icons font get the drawings in glyphs.ts. */
+export function useDrawnGlyphs(on: boolean): void {
+  drawnGlyphs = on;
+  document.documentElement.dataset.glyphs = on ? "svg" : "font";
+}
+
+/** A Segoe Fluent Icons glyph (or its drawing where the font is missing). */
 export function icon(codepoint: string, label?: string): HTMLSpanElement {
-  return h("span", { class: "glyph", "aria-hidden": label ? undefined : "true", "aria-label": label }, codepoint);
+  const content = drawnGlyphs ? glyphSvg(codepoint) : codepoint;
+  return h("span", { class: "glyph", "aria-hidden": label ? undefined : "true", "aria-label": label }, content);
 }
 
 export function field(label: string, control: HTMLElement, hint?: string): HTMLLabelElement {

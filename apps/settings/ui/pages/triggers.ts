@@ -5,9 +5,9 @@ import { api, type Trigger } from "../api";
 import { field, h, icon, numberInput, select, toggle } from "../dom";
 import { t } from "../i18n";
 import { toast } from "../main";
-import { changed, state } from "../state";
+import { changed, onLinux, state } from "../state";
 
-/** Programs with a window open, loaded when asked for. */
+/** Programs with a window open (Linux: this user's programs), loaded when asked for. */
 let programs: string[] | null = null;
 
 async function loadPrograms(): Promise<void> {
@@ -91,11 +91,18 @@ function programFields(tr: Trigger): HTMLElement | null {
       changed();
     },
   });
+  // GNOME on Wayland does not tell apps other windows' titles: the filter is shown on
+  // Linux only when a config from Windows already has one, to say it never matches.
+  const titleField = !onLinux()
+    ? field(t("triggers.windowTitle"), title, t("triggers.windowTitleHint"))
+    : when.windowTitle
+      ? field(t("triggers.windowTitle"), title, t("triggers.windowTitleLinux"))
+      : null;
   return h(
     "div",
     { class: "inspector" },
     h("div", { class: "wide" }, field(t("triggers.programs"), h("span", { class: "row" }, names, pick), t("triggers.programsHint"))),
-    field(t("triggers.windowTitle"), title, t("triggers.windowTitleHint")),
+    titleField,
   );
 }
 

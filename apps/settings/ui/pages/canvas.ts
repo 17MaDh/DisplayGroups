@@ -84,7 +84,9 @@ export function layoutCanvas(
   const maxY = Math.max(...boxes.map((b) => b.y + b.h));
   const pad = Math.max(maxX - minX, maxY - minY) * 0.15 + 200;
   const viewBox = [minX - pad, minY - pad, maxX - minX + 2 * pad, maxY - minY + 2 * pad];
-  const svg = s("svg", { viewBox: viewBox.join(" "), preserveAspectRatio: "xMidYMid meet", role: "img" });
+  // Screen geometry is not mirrored on right-to-left pages, and neither is the text on
+  // it: WebKitGTK ignores Unicode isolates in SVG text, so the direction is set here.
+  const svg = s("svg", { viewBox: viewBox.join(" "), preserveAspectRatio: "xMidYMid meet", role: "img", direction: "ltr", style: "direction:ltr" });
   const fontScale = viewBox[2] / 900;
 
   group.displays.forEach((d, i) => {

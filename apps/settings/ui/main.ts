@@ -3,8 +3,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, type Config, type Group, type Theme } from "./api";
-import { h, icon } from "./dom";
-import { setLanguage, t } from "./i18n";
+import { h, icon, useDrawnGlyphs } from "./dom";
+import { setLanguage, setVariant, t } from "./i18n";
 import { renderDiagnostics } from "./pages/diagnostics";
 import { forgetModes, renderGroups } from "./pages/groups";
 import { renderHotkeys } from "./pages/hotkeys";
@@ -99,25 +99,35 @@ export function themeSwitch(): HTMLElement {
   );
 }
 
-/** Switches to `g` for real and says how it ended (the countdown dialog decides). */
+/**
+ * Switches to `g` for real and says how it ended. On Windows the countdown dialog
+ * decides; on GNOME the switch is done at once and GNOME itself asks whether to keep it
+ * (when the group asks for confirmation), which the page then follows as a change.
+ */
 export async function applyAndReport(g: Group): Promise<void> {
-  toast(t("groups.testing", { name: g.name }));
-  let code: number;
+  const gnome = state.platform.os === "linux";
+  if (!gnome) toast(t("groups.testing", { name: g.name }));
+  let result: { code: number; output: string };
   try {
-    code = await api.applyGroup(g.id);
+    result = await api.applyGroup(g.id);
   } catch (e) {
     toast(String(e), "error");
     return;
   }
   if (await refreshStatus()) changed();
-  if (code === 0) toast(t("groups.applied", { name: g.name }));
-  else if (code === 3) toast(t("groups.reverted", { name: g.name }));
-  else toast(t("groups.applyFailed", { name: g.name }), "error");
+  if (result.code === 0) {
+    toast(t(gnome && g.safety.confirmSeconds > 0 ? "groups.appliedAsk" : "groups.applied", { name: g.name }));
+  } else if (result.code === 3) {
+    toast(t("groups.reverted", { name: g.name }));
+  } else {
+    // Windows' windowless CLI showed the reason in a dialog; elsewhere it is printed.
+    toast(result.output || t("groups.applyFailed", { name: g.name }), "error");
+  }
 }
 
 /**
  * Saving never changes the screen. When the group on screen now was edited, offer to
- * apply it so Windows follows.
+ * apply it so the displays follow.
  */
 export async function saveNow(): Promise<void> {
   const before = JSON.parse(state.saved) as Config;
@@ -148,7 +158,7 @@ function canonical(value: unknown): string {
   );
 }
 
-/** Windows' displays changed: show the new state (re-rendered only if it differs). */
+/** The system's displays changed: show the new state (re-rendered only if it differs). */
 async function displaysChanged(): Promise<void> {
   if (await refreshStatus()) {
     forgetModes();
@@ -256,6 +266,9 @@ window.addEventListener("keydown", (e) => {
 async function main(): Promise<void> {
   state.platform = await api.platform();
   if (state.platform.mica) document.documentElement.dataset.mica = "1";
+  document.documentElement.dataset.os = state.platform.os;
+  setVariant(state.platform.os);
+  useDrawnGlyphs(state.platform.os !== "windows");
   state.icons = await api.builtinIcons();
   await reload();
   state.integration = await api.integration();

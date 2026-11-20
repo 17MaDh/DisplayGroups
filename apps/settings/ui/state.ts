@@ -21,6 +21,14 @@ export const state = {
   selectedDisplay: 0,
 };
 
+/**
+ * GNOME on Linux: no HDR, sound, lock-screen or window-title options, and GNOME itself
+ * asks whether to keep a new layout (ARCHITECTURE.md §16.6).
+ */
+export function onLinux(): boolean {
+  return state.platform?.os === "linux";
+}
+
 const listeners: (() => void)[] = [];
 
 export function subscribe(fn: () => void): void {
@@ -51,7 +59,7 @@ export async function reload(): Promise<void> {
   await refreshStatus();
 }
 
-/** Reads what Windows has on screen now. Returns true when that differs from before. */
+/** Reads what is on screen now. Returns true when that differs from before. */
 export async function refreshStatus(): Promise<boolean> {
   const before = JSON.stringify([state.status, state.currentGroup]);
   try {

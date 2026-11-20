@@ -95,6 +95,11 @@ body.ready {
   display: inline-block;
 }
 
+/* Drawn icons where the glyph font is missing (Linux). */
+.glyph > svg {
+  display: block;
+}
+
 /* ----- shell ----- */
 
 .app {
@@ -522,6 +527,11 @@ button.btn.icon-only[aria-pressed="true"] {
 
 .badge.ok {
   color: var(--success);
+}
+
+/* "On screen" stays on one line next to a group, whatever the font's width. */
+.group-item .badge {
+  white-space: nowrap;
 }
 
 .badge.warn {

@@ -11,7 +11,6 @@
 //! them. The agent only keeps GNOME's custom shortcuts in step with the config.
 
 use std::collections::HashSet;
-use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, Instant, SystemTime};
@@ -20,10 +19,9 @@ use dg_engine::triggers::{Decision, Needs, Observation, Triggers};
 use dg_gnome::dbus::Mutter;
 use dg_gnome::desktop::{self, Dirs};
 use dg_gnome::detect;
-use dg_gnome::keybindings::{self, shell_quote, Shortcut};
+use dg_gnome::keybindings::{self, Shortcut};
 use dg_gnome::tray::{TrayCommand, TrayHandle, TrayLabels, TrayModel};
-use dg_hotkey::Chord;
-use dg_model::{store, Config, Group, HotkeyAction};
+use dg_model::{store, Config, Group};
 use uuid::Uuid;
 
 use crate::commands::{self, Trigger};
@@ -81,7 +79,10 @@ struct Agent {
 }
 
 pub(crate) fn run(ctx: &Ctx, cfg: Config, dry_run: bool, out: Output) -> Result<i32, CliError> {
-    let Some(_instance) = single_instance(&ctx.paths.state_dir)? else {
+    // One agent per user: a lock on `state/agent.lock`, held until the process ends.
+    let Some(_instance) =
+        dg_gnome::system::take_agent_lock(&ctx.paths.state_dir).map_err(CliError::Config)?
+    else {
         out.line("The DisplayGroups agent is already running.");
         return Ok(EXIT_OK);
     };
@@ -153,25 +154,6 @@ pub(crate) fn run(ctx: &Ctx, cfg: Config, dry_run: bool, out: Output) -> Result<
     }
     tracing::info!("agent stopped");
     Ok(EXIT_OK)
-}
-
-/// One agent per user: a lock on `state/agent.lock`, held until the process ends.
-fn single_instance(state_dir: &Path) -> Result<Option<File>, CliError> {
-    std::fs::create_dir_all(state_dir).map_err(|e| CliError::Config(e.to_string()))?;
-    let path = state_dir.join("agent.lock");
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&path)
-        .map_err(|e| CliError::Config(format!("{}: {e}", path.display())))?;
-    match file.try_lock() {
-        Ok(()) => Ok(Some(file)),
-        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
-        Err(std::fs::TryLockError::Error(e)) => {
-            Err(CliError::Config(format!("{}: {e}", path.display())))
-        }
-    }
 }
 
 fn modified(path: &Path) -> Option<SystemTime> {
@@ -330,7 +312,21 @@ impl Agent {
             tracing::info!("dry run: GNOME shortcuts are left as they are");
             return;
         }
-        let (shortcuts, problems) = shortcuts_for(&self.cfg);
+        let (shortcuts, mut problems) = shortcuts_for(&self.cfg);
+        // GNOME's own shortcuts win over custom ones: on Wayland, Ctrl+Alt+F1…F12
+        // switch virtual terminals, for example.
+        for s in &shortcuts {
+            if let Ok(used) = keybindings::conflicts(&s.binding) {
+                if !used.is_empty() {
+                    problems.push(format!(
+                        "{} ({}): {}",
+                        s.name,
+                        s.binding,
+                        t("hotkeys.usedByGnome").replace("{what}", &used.join(", "))
+                    ));
+                }
+            }
+        }
         if self.synced.as_ref() != Some(&shortcuts) {
             match keybindings::sync(&shortcuts) {
                 Ok(()) => {
@@ -547,53 +543,13 @@ fn open_settings() {
     }
 }
 
-/// The GNOME custom shortcuts for the config's hotkeys, and the hotkeys that cannot be
-/// one (an invalid chord, or a key GNOME has no name for).
+/// The GNOME custom shortcuts for the config's hotkeys, running this program, and the
+/// hotkeys that cannot be one.
 fn shortcuts_for(cfg: &Config) -> (Vec<Shortcut>, Vec<String>) {
-    let exe = match crate::commands::self_exe() {
-        Ok(p) => shell_quote(&p.to_string_lossy()),
-        Err(e) => return (Vec::new(), vec![e.to_string()]),
-    };
-    let name_of = |id: &Uuid| {
-        cfg.group_by_id(*id)
-            .map_or_else(|| id.to_string(), |g| g.name.clone())
-    };
-    let mut shortcuts = Vec::new();
-    let mut problems = Vec::new();
-    for hotkey in &cfg.hotkeys {
-        let chord = match Chord::parse(&hotkey.chord) {
-            Ok(c) => c,
-            Err(e) => {
-                problems.push(format!("\"{}\": {e}", hotkey.chord));
-                continue;
-            }
-        };
-        let Some(binding) = chord.gtk_accelerator() else {
-            problems.push(format!("{chord}: GNOME has no name for this key"));
-            continue;
-        };
-        let (label, args) = match &hotkey.action {
-            HotkeyAction::Apply { group } => (name_of(group), format!("apply {group}")),
-            HotkeyAction::Toggle { groups } | HotkeyAction::Cycle { groups } => (
-                groups.iter().map(name_of).collect::<Vec<_>>().join(" / "),
-                format!(
-                    "toggle {}",
-                    groups
-                        .iter()
-                        .map(Uuid::to_string)
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                ),
-            ),
-            HotkeyAction::Recover => (t("tray.recover"), "recover".into()),
-        };
-        shortcuts.push(Shortcut {
-            name: format!("DisplayGroups: {label}"),
-            command: format!("{exe} {args}"),
-            binding,
-        });
+    match commands::self_exe() {
+        Ok(exe) => keybindings::for_config(cfg, &exe, &t("tray.recover")),
+        Err(e) => (Vec::new(), vec![e.to_string()]),
     }
-    (shortcuts, problems)
 }
 
 #[cfg(test)]
@@ -607,34 +563,5 @@ mod tests {
         assert!(fallback_needed(&tv, &desk));
         assert!(!fallback_needed(&desk, &["DP-1".to_string()]));
         assert!(!fallback_needed(&[], &desk));
-    }
-
-    #[test]
-    fn hotkeys_become_gnome_shortcuts() {
-        let desk = Uuid::new_v4();
-        let couch = Uuid::new_v4();
-        let cfg: Config = serde_json::from_value(serde_json::json!({
-            "schemaVersion": 1,
-            "groups": [
-                { "id": desk, "name": "Desktop", "displays": [] },
-                { "id": couch, "name": "Couch", "displays": [] }
-            ],
-            "hotkeys": [
-                { "chord": "Ctrl+Alt+F12", "action": { "type": "toggle", "groups": [desk, couch] } },
-                { "chord": "Win+Shift+R", "action": { "type": "recover" } },
-                { "chord": "Ctrl+Nope", "action": { "type": "apply", "group": desk } }
-            ]
-        }))
-        .unwrap();
-        let (shortcuts, problems) = shortcuts_for(&cfg);
-        assert_eq!(shortcuts.len(), 2);
-        assert_eq!(shortcuts[0].binding, "<Control><Alt>F12");
-        assert_eq!(shortcuts[0].name, "DisplayGroups: Desktop / Couch");
-        assert!(shortcuts[0]
-            .command
-            .ends_with(&format!(" toggle {desk} {couch}")));
-        assert_eq!(shortcuts[1].binding, "<Shift><Super>r");
-        assert!(shortcuts[1].command.ends_with(" recover"));
-        assert_eq!(problems.len(), 1);
     }
 }

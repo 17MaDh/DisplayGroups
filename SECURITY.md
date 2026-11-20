@@ -52,6 +52,9 @@ This is here so you can judge the risk, and so reports can say which property th
   - Displays are changed through GNOME's own display service on the session bus.
   - Automatic switching reads process names from `/proc` and checks `/sys` for game
     controllers. Nothing is stored or sent.
+  - The settings app lists your own programs from `/proc` only when you ask for the list,
+    reads GNOME's shortcut settings to warn about clashes, and opens pictures only through
+    the desktop's file chooser.
 - **Downloads:** every release lists SHA-256 checksums. Signed releases are signed through the
   SignPath Foundation programme ([docs/releasing.md](docs/releasing.md)).
 

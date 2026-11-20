@@ -17,6 +17,10 @@
 //! * [`keybindings`]: hotkeys as GNOME custom shortcuts.
 //! * [`detect`]: running programs and game controllers, for automatic switching.
 //! * `notify`, `tray` (Linux only): notifications and the StatusNotifierItem tray icon.
+//!
+//! For the settings app (phase L3):
+//! * [`system`]: language, the agent's lock, the system's name, opening folders.
+//! * `portal` (Linux only): the desktop's "Open file" dialog.
 
 pub mod desktop;
 pub mod detect;
@@ -26,11 +30,14 @@ pub mod observe;
 pub mod ops;
 pub mod plan;
 pub mod state;
+pub mod system;
 
 #[cfg(target_os = "linux")]
 pub mod dbus;
 #[cfg(target_os = "linux")]
 pub mod notify;
+#[cfg(target_os = "linux")]
+pub mod portal;
 #[cfg(target_os = "linux")]
 pub mod tray;
 

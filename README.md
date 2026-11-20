@@ -213,10 +213,14 @@ A port to Ubuntu's default desktop, GNOME on Wayland or X11, is under way
 ([ARCHITECTURE.md §16](ARCHITECTURE.md#16-linux-ubuntu-gnome)). It switches displays through
 GNOME's own display service, the one GNOME Settings uses.
 
+- **Available now: the settings app** (`displaygroups-settings`), the same as on Windows:
+  groups and the layout editor, hotkeys, automatic switching, shortcuts, settings and
+  diagnostics, in English and Arabic. Options GNOME does not have (HDR, sound output,
+  lock-screen hotkeys) are hidden.
 - **Available now: the command line.** These commands work as on Windows:
-  - `status`, `list`, `capture`, `validate`, `apply`, `toggle`;
+  - `status`, `list`, `capture`, `validate`, `apply`, `toggle`, `identify`;
   - `duplicate`, `recover [--extend]`, and `displaygroups://` links.
-- **Available now: the agent** (`displaygroups agent`):
+- **Available now: the agent** (`displaygroups agent`, started by the settings app):
   - a tray icon in the top bar, with the same menu as on Windows;
   - automatic switching when a program starts or a game controller connects;
   - the disconnect fallback;
@@ -224,6 +228,9 @@ GNOME's own display service, the one GNOME Settings uses.
 - **Hotkeys:** the agent writes your hotkeys into GNOME's own **Custom Shortcuts**
   (Settings → Keyboard), named "DisplayGroups: …". GNOME runs them, so they work even when
   the agent is not running, and your other shortcuts are left alone.
+  - GNOME keeps **Ctrl+Alt+F1…F12** for switching to the text consoles, so use another
+    chord on Linux, such as Super+Shift+F12. The Hotkeys page says when GNOME already uses
+    one.
 - **Integration:**
   - `startup on` starts the agent when you log in;
   - `protocol on` handles `displaygroups://` links;
@@ -232,14 +239,14 @@ GNOME's own display service, the one GNOME Settings uses.
   switches without asking, but GNOME brings back its remembered layout at the next sign-in.
 - **Settings:** in `~/.config/displaygroups/config.json`. A config captured on Windows
   recognises the same monitors.
-- **Not yet:** the settings app, `identify`, and `.deb`/AppImage packages.
+- **Not yet:** `.deb`/AppImage packages, and testing on real hardware.
 
 ```bash
-tar xzf DisplayGroups-<version>-linux-x64-cli.tar.gz
-cd DisplayGroups-<version>-linux-x64-cli
-./displaygroups capture "Desktop"
+tar xzf DisplayGroups-<version>-linux-x64.tar.gz
+cd DisplayGroups-<version>-linux-x64
+./displaygroups-settings &        # the settings app; it starts the agent
+./displaygroups capture "Desktop" # or the command line
 ./displaygroups startup on        # the agent from the next login
-./displaygroups agent &           # or right now
 ```
 
 ## Building from source
@@ -262,10 +269,12 @@ cargo test --workspace
 cargo build --release --features displaygroups-settings/custom-protocol
 ```
 
-For Linux, on Ubuntu 24.04 or in WSL, with rustup, `build-essential` and `pkg-config`:
+For Linux, on Ubuntu 24.04 or in WSL, with rustup, `build-essential`, `pkg-config` and
+`libwebkit2gtk-4.1-dev`. Build the page first (`npm ci` and `npm run build` in
+`apps/settings`; from WSL, do this on Windows):
 
 ```bash
-bash scripts/build-linux.sh   # checks, tests, release build and dist-release/*-linux-x64-cli.tar.gz
+bash scripts/build-linux.sh   # checks, tests, release build and dist-release/*-linux-x64.tar.gz
 ```
 
 `npm run tauri dev` in `apps\settings` runs the settings app with live reload. Builds you make

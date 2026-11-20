@@ -318,9 +318,93 @@ pub fn write_launcher(dir: &Path, file_name: &str, text: &str) -> Result<PathBuf
     Ok(path)
 }
 
+/// A local path from a `file://` URI (as the file chooser portal returns them), with
+/// percent-escapes decoded. `None` for other schemes or a remote host.
+pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
+    let rest = uri.strip_prefix("file://")?;
+    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+    if !rest.starts_with('/') {
+        return None;
+    }
+    let bytes = rest.as_bytes();
+    let hex = |i: usize| {
+        bytes
+            .get(i)
+            .and_then(|b| char::from(*b).to_digit(16))
+            .map(|d| d as u8)
+    };
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if let (Some(hi), Some(lo)) = (hex(i + 1), hex(i + 2)) {
+                out.push(hi * 16 + lo);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).ok().map(PathBuf::from)
+}
+
+/// Picture types a custom group icon may be.
+pub const ICON_EXTENSIONS: [&str; 3] = ["png", "svg", "ico"];
+
+/// The name a custom icon is stored under in the icons folder (`custom-<file name>`),
+/// or an error when `source` is not a PNG, SVG or ICO file.
+pub fn icon_file_name(source: &Path) -> Result<String, String> {
+    let name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| format!("{} is not a file", source.display()))?;
+    let ext = source
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if !ICON_EXTENSIONS.contains(&ext.as_str()) {
+        return Err(format!("{name}: use a PNG, SVG or ICO picture"));
+    }
+    Ok(format!("custom-{name}"))
+}
+
+/// Copies a picture into the icons folder for `group.icon` and returns that value
+/// (`file:custom-<name>`).
+pub fn import_icon(icons_dir: &Path, source: &Path) -> Result<String, String> {
+    let file = icon_file_name(source)?;
+    let bytes = std::fs::read(source).map_err(|e| format!("{}: {e}", source.display()))?;
+    dg_model::store::write_atomic(&icons_dir.join(&file), &bytes).map_err(|e| e.to_string())?;
+    Ok(format!("file:{file}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_uris_become_paths() {
+        assert_eq!(
+            path_from_uri("file:///home/u/My%20Pictures/tv%E2%9C%93.png"),
+            Some(PathBuf::from("/home/u/My Pictures/tv✓.png"))
+        );
+        assert_eq!(
+            path_from_uri("file://localhost/tmp/a%zz.png"),
+            Some(PathBuf::from("/tmp/a%zz.png"))
+        );
+        assert_eq!(path_from_uri("https://example.org/a.png"), None);
+        assert_eq!(path_from_uri("file://server/share/a.png"), None);
+    }
+
+    #[test]
+    fn custom_icons_are_pictures() {
+        assert_eq!(
+            icon_file_name(Path::new("/home/u/Pictures/tv.PNG")).unwrap(),
+            "custom-tv.PNG"
+        );
+        assert!(icon_file_name(Path::new("/home/u/notes.txt")).is_err());
+        assert!(icon_file_name(Path::new("/home/u/noext")).is_err());
+    }
 
     #[test]
     fn exec_arguments_are_quoted_per_the_spec() {

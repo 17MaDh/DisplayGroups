@@ -20,10 +20,18 @@ dg-model.workspace = true
 dg-identity.workspace = true
 dg-hotkey.workspace = true
 dg-engine.workspace = true
-dg-win.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+dg-win.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+dg-gnome.workspace = true
+# The same GTK 3 bindings Tauri's window layer uses, to put "Identify" windows full
+# screen on a chosen display.
+gtk = "0.18"
 
 [lints]
 workspace = true

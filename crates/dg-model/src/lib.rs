@@ -6,6 +6,7 @@
 mod config;
 mod error;
 pub mod geometry;
+pub mod icons;
 pub mod migrate;
 pub mod paths;
 pub mod store;
