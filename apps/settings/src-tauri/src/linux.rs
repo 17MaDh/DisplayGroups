@@ -28,6 +28,31 @@ pub const CLI_SWITCH: &str = "displaygroups";
 
 pub fn no_console(_command: &mut Command) {}
 
+/// `displaygroups-settings <command> …` runs `displaygroups <command> …` in its place.
+///
+/// An AppImage has a single entry point, this app, so the commands saved for later
+/// (`$APPIMAGE agent` at login, `$APPIMAGE toggle …` in GNOME shortcuts, launchers and
+/// `displaygroups://` links) reach the command line this way. Only `--identify` belongs
+/// to the settings app; with no arguments it opens its window.
+pub fn hand_to_cli(exe_dir: &Path, args: &[String]) {
+    use std::os::unix::process::CommandExt;
+    if !hands_to_cli(args) {
+        return;
+    }
+    let cli = exe_dir.join(CLI);
+    if !cli.is_file() {
+        return;
+    }
+    // `exec` only returns when it fails.
+    let error = Command::new(&cli).args(args).exec();
+    eprintln!("{}: {error}", cli.display());
+    std::process::exit(1);
+}
+
+pub fn hands_to_cli(args: &[String]) -> bool {
+    args.first().is_some_and(|first| first != "--identify")
+}
+
 pub fn build() -> u32 {
     0
 }
@@ -212,7 +237,10 @@ pub fn start_agent(exe_dir: &Path, paths: &AppPaths) {
     if system::agent_running(&paths.state_dir) || !agent.is_file() {
         return;
     }
-    let _ = Command::new(agent)
+    // From an AppImage, through the AppImage file: the agent keeps running after this
+    // window closes, so it needs a mount of its own (see `system::appimage`).
+    let program = system::appimage().unwrap_or(agent);
+    let _ = Command::new(program)
         .arg("agent")
         .current_dir(exe_dir)
         .stdin(Stdio::null())

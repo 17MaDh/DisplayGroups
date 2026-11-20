@@ -521,11 +521,14 @@ fn group_by_id(cfg: &Config, id: Uuid) -> Result<Group, CliError> {
     })
 }
 
-/// Starts the settings app if it is installed next to the agent (phase L3).
+/// Starts the settings app installed next to the agent. From an AppImage it is started
+/// through the AppImage file, so the window does not depend on the agent's mount.
 fn open_settings() {
-    let exe = std::env::current_exe()
-        .ok()
-        .map(|p| p.with_file_name("displaygroups-settings"));
+    let exe = dg_gnome::system::appimage().or_else(|| {
+        std::env::current_exe()
+            .ok()
+            .map(|p| p.with_file_name("displaygroups-settings"))
+    });
     match exe {
         Some(exe) if exe.is_file() => {
             if let Err(e) = std::process::Command::new(&exe).spawn() {

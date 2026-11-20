@@ -92,9 +92,88 @@ pub fn os_release_name(text: &str) -> Option<String> {
     value("PRETTY_NAME").or_else(|| value("NAME"))
 }
 
+/// The AppImage file this process came from (`$APPIMAGE`), if any.
+///
+/// An AppImage runs from a temporary mount that goes away when the process it started
+/// ends. Programs that must outlive their parent (the agent, the settings window
+/// opened from the tray) and commands saved for later (autostart, GNOME shortcuts,
+/// launchers, links) therefore go through this file, which mounts it again; its entry
+/// point, the settings app, hands command-line arguments on to `displaygroups`.
+pub fn appimage() -> Option<PathBuf> {
+    std::env::var_os("APPIMAGE")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.is_file())
+}
+
+/// Variables an AppImage's start-up hooks point into its own mount, so that the GTK and
+/// WebKit bundled with it find their modules, schemas and themes.
+const APPIMAGE_GTK_VARS: [&str; 10] = [
+    "GDK_PIXBUF_MODULE_FILE",
+    "GIO_EXTRA_MODULES",
+    "GIO_MODULE_DIR",
+    "GI_TYPELIB_PATH",
+    "GSETTINGS_SCHEMA_DIR",
+    "GTK_DATA_PREFIX",
+    "GTK_EXE_PREFIX",
+    "GTK_IM_MODULE_FILE",
+    "GTK_PATH",
+    "GTK_THEME",
+];
+
+/// Search-path variables an AppImage may have put its own folders in front of.
+const SEARCH_PATHS: [&str; 3] = ["XDG_DATA_DIRS", "PATH", "LD_LIBRARY_PATH"];
+
+/// How to change the environment `vars` of a process running from an AppImage mounted at
+/// `appdir`, for a program of the system: `(name, None)` removes a variable and
+/// `(name, Some(value))` sets it. Without this, a GTK program started as a before/after
+/// action would load the AppImage's GTK modules. Empty when `appdir` is not a folder.
+pub fn host_env_changes(vars: &[(String, String)], appdir: &str) -> Vec<(String, Option<String>)> {
+    if !appdir.starts_with('/') || appdir.len() < 2 {
+        return Vec::new();
+    }
+    let mut changes = Vec::new();
+    for (name, value) in vars {
+        if APPIMAGE_GTK_VARS.contains(&name.as_str()) {
+            // GTK_THEME is set from APPIMAGE_GTK_THEME, usually empty.
+            if value.is_empty() || value.contains(appdir) {
+                changes.push((name.clone(), None));
+            }
+        } else if SEARCH_PATHS.contains(&name.as_str()) {
+            let kept: Vec<&str> = value
+                .split(':')
+                .filter(|p| !p.is_empty() && !p.starts_with(appdir))
+                .collect();
+            if kept.len() != value.split(':').count() {
+                let joined = kept.join(":");
+                changes.push((name.clone(), (!joined.is_empty()).then_some(joined)));
+            }
+        } else if matches!(name.as_str(), "APPDIR" | "ARGV0" | "OWD") {
+            changes.push((name.clone(), None));
+        }
+    }
+    changes
+}
+
+/// Prepares `command`, a program of the system (`gsettings`, `xdg-open`, an action), to
+/// run with the session's own environment rather than the AppImage's, when this process
+/// runs from an AppImage. DisplayGroups' own programs keep the environment as it is.
+pub fn for_host(command: &mut std::process::Command) -> &mut std::process::Command {
+    if let Ok(appdir) = std::env::var("APPDIR") {
+        let vars: Vec<(String, String)> = std::env::vars().collect();
+        for (name, value) in host_env_changes(&vars, &appdir) {
+            match value {
+                Some(v) => command.env(name, v),
+                None => command.env_remove(name),
+            };
+        }
+    }
+    command
+}
+
 /// Opens a folder, file or URL with the desktop's default application.
 pub fn open(target: &Path) -> Result<(), String> {
-    std::process::Command::new("xdg-open")
+    for_host(&mut std::process::Command::new("xdg-open"))
         .arg(target)
         .spawn()
         .map(drop)
@@ -119,6 +198,50 @@ mod tests {
         assert_eq!(os_release_name(text).as_deref(), Some("Ubuntu 24.04.1 LTS"));
         assert_eq!(os_release_name("NAME=Fedora\n").as_deref(), Some("Fedora"));
         assert_eq!(os_release_name("ID=x\n"), None);
+    }
+
+    #[test]
+    fn programs_of_the_system_get_the_session_environment_back() {
+        let vars: Vec<(String, String)> = [
+            ("GTK_PATH", "/tmp/.mount_x/usr/lib/gtk-3.0"),
+            ("GTK_THEME", ""),
+            (
+                "GSETTINGS_SCHEMA_DIR",
+                "/tmp/.mount_x//usr/share/glib-2.0/schemas",
+            ),
+            (
+                "XDG_DATA_DIRS",
+                "/tmp/.mount_x/usr/share:/usr/share:/usr/local/share",
+            ),
+            ("PATH", "/usr/local/bin:/usr/bin"),
+            ("APPDIR", "/tmp/.mount_x"),
+            ("APPIMAGE", "/home/sam/DisplayGroups.AppImage"),
+            ("HOME", "/home/sam"),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let changes = host_env_changes(&vars, "/tmp/.mount_x");
+        let change = |name: &str| {
+            changes
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| v.clone())
+        };
+        assert_eq!(change("GTK_PATH"), Some(None));
+        assert_eq!(change("GTK_THEME"), Some(None));
+        assert_eq!(change("GSETTINGS_SCHEMA_DIR"), Some(None));
+        assert_eq!(
+            change("XDG_DATA_DIRS"),
+            Some(Some("/usr/share:/usr/local/share".to_string()))
+        );
+        assert_eq!(change("APPDIR"), Some(None));
+        // Untouched: a PATH without the mount, APPIMAGE, everything else.
+        assert_eq!(change("PATH"), None);
+        assert_eq!(change("APPIMAGE"), None);
+        assert_eq!(change("HOME"), None);
+        // Not from an AppImage: nothing changes.
+        assert!(host_env_changes(&vars, "").is_empty());
     }
 
     #[test]

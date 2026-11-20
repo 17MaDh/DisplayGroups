@@ -23,25 +23,39 @@ pub struct Output {
     pub rtl: bool,
 }
 
+/// Writes a line to standard output. Unlike `println!`, a reader that went away
+/// (`displaygroups list | head -1`) is not an error: the command still finishes what it
+/// was doing, such as a switch, instead of stopping halfway.
+pub fn stdout_line(text: &str) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stdout().lock(), "{text}");
+}
+
+/// The same for standard error.
+pub fn stderr_line(text: &str) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stderr().lock(), "{text}");
+}
+
 impl Output {
     pub fn line(&self, text: impl AsRef<str>) {
         if self.console && !self.json {
-            println!("{}", text.as_ref());
+            stdout_line(text.as_ref());
         }
     }
 
     pub fn warn(&self, text: impl AsRef<str>) {
         tracing::warn!("{}", text.as_ref());
         if self.console {
-            eprintln!("warning: {}", text.as_ref());
+            stderr_line(&format!("warning: {}", text.as_ref()));
         }
     }
 
     pub fn json<T: Serialize>(&self, value: &T) {
         if self.console && self.json {
             match serde_json::to_string_pretty(value) {
-                Ok(s) => println!("{s}"),
-                Err(e) => eprintln!("error: {e}"),
+                Ok(s) => stdout_line(&s),
+                Err(e) => stderr_line(&format!("error: {e}")),
             }
         }
     }
@@ -49,7 +63,7 @@ impl Output {
     pub fn error(&self, text: impl AsRef<str>) {
         tracing::error!("{}", text.as_ref());
         if self.console {
-            eprintln!("error: {}", text.as_ref());
+            stderr_line(&format!("error: {}", text.as_ref()));
         } else {
             crate::sys::show_error("DisplayGroups", text.as_ref());
         }

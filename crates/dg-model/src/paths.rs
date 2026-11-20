@@ -75,6 +75,20 @@ impl AppPaths {
     }
 }
 
+/// Where the translations (`<code>.json`) are installed for executables in `exe_dir`:
+/// `locales` beside them (the Windows installer and ZIP, the Linux tarball), else the
+/// packaged resources folder `../lib/DisplayGroups/locales` (the `.deb` puts the
+/// programs in `/usr/bin` and the resources in `/usr/lib/DisplayGroups`, and an
+/// AppImage does the same under its mount). `None` when neither exists.
+pub fn installed_locales(exe_dir: &Path) -> Option<PathBuf> {
+    [
+        exe_dir.join("locales"),
+        exe_dir.join("../lib").join(APP_DIR).join("locales"),
+    ]
+    .into_iter()
+    .find(|dir| dir.is_dir())
+}
+
 fn env_dir(name: &'static str) -> Result<PathBuf, ModelError> {
     std::env::var_os(name)
         .filter(|v| !v.is_empty())
@@ -104,5 +118,27 @@ mod tests {
         assert!(p.portable);
         assert_eq!(p.config_file, dir.join("data").join("config.json"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn locales_are_found_beside_or_in_the_package_resources() {
+        let root = std::env::temp_dir().join(format!("dg-locales-{}", uuid::Uuid::new_v4()));
+        let bin = root.join("usr").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        assert_eq!(installed_locales(&bin), None);
+
+        // A .deb or AppImage: /usr/bin and /usr/lib/DisplayGroups/locales.
+        let packaged = root.join("usr").join("lib").join(APP_DIR).join("locales");
+        std::fs::create_dir_all(&packaged).unwrap();
+        let found = installed_locales(&bin).unwrap();
+        assert_eq!(
+            found.canonicalize().unwrap(),
+            packaged.canonicalize().unwrap()
+        );
+
+        // A tarball or the Windows install: locales next to the programs win.
+        std::fs::create_dir_all(bin.join("locales")).unwrap();
+        assert_eq!(installed_locales(&bin), Some(bin.join("locales")));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

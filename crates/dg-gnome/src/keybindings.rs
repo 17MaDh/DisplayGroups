@@ -111,7 +111,7 @@ pub fn merged_list(current: &[String], ours: usize) -> Vec<String> {
 }
 
 fn gsettings(args: &[&str]) -> Result<String, String> {
-    let output = Command::new("gsettings")
+    let output = crate::system::for_host(&mut Command::new("gsettings"))
         .args(args)
         .output()
         .map_err(|e| format!("gsettings is not available ({e})"))?;

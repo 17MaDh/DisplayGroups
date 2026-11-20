@@ -165,14 +165,16 @@ enum CliCommand {
     },
 }
 
-/// `locales` next to the executable. Debug builds fall back to the repository's
-/// folder, so translations can be tried without copying files.
+/// The installed translations (`locales` next to the executable, or the Linux packages'
+/// resources folder; see `dg_model::paths::installed_locales`). Debug builds fall back
+/// to the repository's folder, so translations can be tried without copying files.
 fn locales_dir(app: &App) -> PathBuf {
-    let beside = app.exe_dir.join("locales");
-    if beside.is_dir() || !cfg!(debug_assertions) {
-        beside
-    } else {
+    if let Some(dir) = dg_model::paths::installed_locales(&app.exe_dir) {
+        dir
+    } else if cfg!(debug_assertions) {
         PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../locales"))
+    } else {
+        app.exe_dir.join("locales")
     }
 }
 
@@ -533,6 +535,8 @@ fn main() {
         .ok()
         .and_then(|p| p.parent().map(PathBuf::from))
         .unwrap_or_default();
+    #[cfg(target_os = "linux")]
+    sys::hand_to_cli(&exe_dir, &std::env::args().skip(1).collect::<Vec<_>>());
     let paths = match AppPaths::resolve(Some(&exe_dir)) {
         Ok(p) => p,
         Err(e) => {
@@ -642,5 +646,17 @@ mod tests {
             identify_only(&args(&["--identify", "--seconds", "99"])),
             Some(30)
         );
+    }
+
+    /// The AppImage's single entry point passes commands on to the CLI.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn commands_are_handed_to_the_cli() {
+        let args = |s: &[&str]| s.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        assert!(!sys::hands_to_cli(&args(&[])));
+        assert!(!sys::hands_to_cli(&args(&["--identify", "--seconds", "5"])));
+        assert!(sys::hands_to_cli(&args(&["agent"])));
+        assert!(sys::hands_to_cli(&args(&["toggle", "a", "b"])));
+        assert!(sys::hands_to_cli(&args(&["--version"])));
     }
 }

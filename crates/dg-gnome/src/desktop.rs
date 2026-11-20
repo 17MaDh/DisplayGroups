@@ -311,7 +311,7 @@ pub fn write_launcher(dir: &Path, file_name: &str, text: &str) -> Result<PathBuf
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
             .map_err(|e| format!("{}: {e}", path.display()))?;
         // Best effort: the GNOME desktop icons extension asks for this flag.
-        let _ = std::process::Command::new("gio")
+        let _ = crate::system::for_host(&mut std::process::Command::new("gio"))
             .args(["set", &path.to_string_lossy(), "metadata::trusted", "true"])
             .output();
     }

@@ -98,9 +98,16 @@ Versions before 1.0 are pre-releases, and the Windows build is not code-signed y
   - Unzip anywhere you can write to and run `displaygroups-settings.exe`.
   - Everything is kept in a `data` folder next to it.
   - Delete `portable.flag` to use the normal locations instead.
-- **Linux, preview** (`DisplayGroups-<version>-linux-x64.tar.gz`): the settings app, the
-  command line and the agent for GNOME. See [Linux (preview)](#linux-preview). Up to
-  v0.1.0 the package was `…-linux-x64-cli.tar.gz`, without the settings app.
+- **Linux, preview**, for GNOME on Ubuntu 24.04 or later. Each package has the settings
+  app, the command line and the agent; see [Linux (preview)](#linux-preview).
+  - **`.deb`** (`DisplayGroups-<version>-linux-x64.deb`): install it with
+    `sudo apt install ./DisplayGroups-<version>-linux-x64.deb`, and DisplayGroups appears in
+    the app grid. Remove it with `sudo apt remove display-groups`.
+  - **AppImage** (`DisplayGroups-<version>-linux-x64.AppImage`): nothing to install. Make it
+    executable and run it. On Ubuntu it needs `libfuse2t64`.
+  - **Tarball** (`DisplayGroups-<version>-linux-x64.tar.gz`): unpack it and run
+    `./displaygroups-settings`. It needs WebKitGTK 4.1 (`libwebkit2gtk-4.1-0`). Up to v0.1.0
+    it was `…-linux-x64-cli.tar.gz`, without the settings app.
 
 The settings app uses Microsoft Edge WebView2, which Windows 11 includes. On Windows 10 the
 installer downloads it if it is missing.
@@ -240,14 +247,26 @@ GNOME's own display service, the one GNOME Settings uses.
   switches without asking, but GNOME brings back its remembered layout at the next sign-in.
 - **Settings:** in `~/.config/displaygroups/config.json`. A config captured on Windows
   recognises the same monitors.
-- **Not yet:** `.deb`/AppImage packages, and testing on real hardware.
+- **Packages:** a `.deb`, an AppImage and a tarball ([Install](#install)).
+  - From the AppImage, the login start, links, launchers and GNOME shortcuts all run the
+    AppImage file itself, which passes commands on to `displaygroups`. If you move the file,
+    turn those off and on again in Settings.
+- **Not yet:** testing on real hardware. [docs/linux-vm-checklist.md](docs/linux-vm-checklist.md)
+  lists what to try.
 
 ```bash
-tar xzf DisplayGroups-<version>-linux-x64.tar.gz
-cd DisplayGroups-<version>-linux-x64
-./displaygroups-settings &        # the settings app; it starts the agent
-./displaygroups capture "Desktop" # or the command line
-./displaygroups startup on        # the agent from the next login
+sudo apt install ./DisplayGroups-<version>-linux-x64.deb
+displaygroups-settings &          # or DisplayGroups in the app grid; it starts the agent
+displaygroups capture "Desktop"   # the command line
+displaygroups startup on          # the agent from the next login
+```
+
+With the AppImage, the same commands go through the file:
+
+```bash
+chmod +x DisplayGroups-<version>-linux-x64.AppImage
+./DisplayGroups-<version>-linux-x64.AppImage                 # the settings app
+./DisplayGroups-<version>-linux-x64.AppImage capture "Desktop"
 ```
 
 ## Building from source
@@ -272,10 +291,13 @@ cargo build --release --features displaygroups-settings/custom-protocol
 
 For Linux, on Ubuntu 24.04 or in WSL, with rustup, `build-essential`, `pkg-config` and
 `libwebkit2gtk-4.1-dev`. Build the page first (`npm ci` and `npm run build` in
-`apps/settings`; from WSL, do this on Windows):
+`apps/settings`; from WSL, do this on Windows). The `.deb` and the AppImage also need the
+Tauri CLI: `npm ci` provides it, or `cargo install tauri-cli` with the version in
+`apps/settings/package.json`.
 
 ```bash
-bash scripts/build-linux.sh   # checks, tests, release build and dist-release/*-linux-x64.tar.gz
+bash scripts/build-linux.sh               # checks, tests, then the tarball, .deb and AppImage
+bash scripts/build-linux.sh --no-bundle   # stop after the tarball
 ```
 
 `npm run tauri dev` in `apps\settings` runs the settings app with live reload. Builds you make

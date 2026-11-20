@@ -37,17 +37,21 @@ pub fn resolve(setting: &str) -> String {
     }
 }
 
-/// `locales` next to the executable. Debug builds fall back to the repository's
-/// folder, so translations can be tried without copying files.
+/// The installed translations (`locales` next to the executable, or the Linux packages'
+/// resources folder; see `dg_model::paths::installed_locales`). Debug builds fall back
+/// to the repository's folder, so translations can be tried without copying files.
 pub fn locales_dir() -> Option<PathBuf> {
-    let beside = std::env::current_exe().ok()?.parent()?.join("locales");
-    if beside.is_dir() || !cfg!(debug_assertions) {
-        Some(beside)
-    } else {
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    if let Some(dir) = dg_model::paths::installed_locales(&exe_dir) {
+        return Some(dir);
+    }
+    if cfg!(debug_assertions) {
         Some(PathBuf::from(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../locales"
         )))
+    } else {
+        Some(exe_dir.join("locales"))
     }
 }
 

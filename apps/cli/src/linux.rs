@@ -88,10 +88,11 @@ pub(crate) fn dispatch(
 }
 
 /// This program's path, for desktop entries and GNOME shortcuts. An AppImage runs from
-/// a temporary mount, so its own file (`$APPIMAGE`) is what must be launched.
+/// a temporary mount, so its own file (`$APPIMAGE`) is what must be launched; it hands
+/// the arguments on to this program.
 pub(crate) fn self_exe() -> Result<PathBuf, CliError> {
-    if let Some(appimage) = std::env::var_os("APPIMAGE").filter(|v| !v.is_empty()) {
-        return Ok(PathBuf::from(appimage));
+    if let Some(appimage) = dg_gnome::system::appimage() {
+        return Ok(appimage);
     }
     std::env::current_exe().map_err(|e| CliError::Config(e.to_string()))
 }

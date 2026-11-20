@@ -44,6 +44,10 @@ This is here so you can judge the risk, and so reports can say which property th
     - limits messages to 64 KB.
   - The service never receives or runs actions. ARCHITECTURE.md §8 has the details.
 - **Linux (preview, GNOME):**
+  - **Installing:** the `.deb` needs admin rights through `apt` and adds only
+    `/usr/bin/displaygroups`, `/usr/bin/displaygroups-settings`, `/usr/lib/DisplayGroups`
+    (translations), an app-grid entry and its icons. It has no install or remove scripts.
+    The AppImage and the tarball install nothing.
   - Everything runs as you. DisplayGroups writes only in your home folder:
     - `~/.config/displaygroups` and `~/.local/state/displaygroups`;
     - `.desktop` files for autostart, links and launchers, plus one line in

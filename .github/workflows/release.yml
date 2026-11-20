@@ -2,9 +2,12 @@ name: Release
 
 # Pushing a tag such as v1.0.0 builds, tests and (when SignPath is set up) signs a
 # release, then creates a *draft* GitHub release with the Windows installer, the portable
-# ZIP, the Linux package and SHA256SUMS.txt. A maintainer reviews the draft
-# and publishes it by hand. Versions below 1.0 and tags with a suffix (v1.1.0-rc.1) are
-# marked as pre-releases.
+# ZIP, the Linux packages (tarball, .deb, AppImage) and SHA256SUMS.txt. A maintainer
+# reviews the draft and publishes it by hand. Versions below 1.0 and tags with a suffix
+# (v1.1.0-rc.1) are marked as pre-releases.
+#
+# "Run workflow" (manual) builds only the Linux packages and keeps them as a workflow
+# artifact, to try the packaging without a release.
 #
 # Signing is optional. It is on when the repository variable SIGNPATH_ORGANIZATION_ID
 # is set; docs/releasing.md lists the other variables, the secret and the SignPath
@@ -13,6 +16,7 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,12 +29,13 @@ jobs:
   # The Linux settings app, command line and agent for GNOME (ARCHITECTURE.md §16),
   # checked, tested and packed by scripts/build-linux.sh.
   linux:
-    name: Build the Linux package
+    name: Build the Linux packages
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
       - name: The tag matches the version
+        if: github.ref_type == 'tag'
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           if [[ "${GITHUB_REF_NAME#v}" != "$version" ]]; then
@@ -65,12 +70,16 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: linux-package
-          path: dist-release/*-linux-x64.tar.gz
+          path: |
+            dist-release/*-linux-x64.tar.gz
+            dist-release/*-linux-x64.deb
+            dist-release/*-linux-x64.AppImage
           if-no-files-found: error
 
   release:
     name: Build, sign and draft the release
     needs: linux
+    if: github.ref_type == 'tag'
     # GitHub-hosted, as SignPath's open-source signing requires for every job that
     # leads to a signing request.
     runs-on: windows-latest
@@ -230,9 +239,9 @@ jobs:
           $bad = @($files | Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' })
           if ($bad) { throw "Not signed: $($bad.Name -join ', ')" }
 
-      # ---- The Linux package ----------------------------------------------------------
+      # ---- The Linux packages ---------------------------------------------------------
 
-      - name: Add the Linux package
+      - name: Add the Linux packages
         uses: actions/download-artifact@v8
         with:
           name: linux-package
@@ -258,11 +267,13 @@ jobs:
           |---|---|
           | **Windows 10 and 11**, installer | ``DisplayGroups-$v-setup-x64.exe`` |
           | **Windows 10 and 11**, portable | ``DisplayGroups-$v-portable-x64.zip`` |
-          | **Linux** (preview), GNOME on Ubuntu 24.04 or later | ``DisplayGroups-$v-linux-x64.tar.gz`` |
+          | **Linux** (preview), Ubuntu and Debian package | ``DisplayGroups-$v-linux-x64.deb`` |
+          | **Linux** (preview), AppImage | ``DisplayGroups-$v-linux-x64.AppImage`` |
+          | **Linux** (preview), tarball | ``DisplayGroups-$v-linux-x64.tar.gz`` |
 
           $signed
 
-          The Linux package has the settings app, the command line and the agent: the tray icon, hotkeys as GNOME shortcuts, automatic switching and notifications. It needs WebKitGTK 4.1 (``libwebkit2gtk-4.1-0``, installed on Ubuntu desktops). See "Linux (preview)" in the README.
+          The Linux packages have the settings app, the command line and the agent: the tray icon, hotkeys as GNOME shortcuts, automatic switching and notifications. They are made for GNOME on Ubuntu 24.04 or later. Install the .deb with ``sudo apt install ./DisplayGroups-$v-linux-x64.deb``. The AppImage runs without installing (on Ubuntu it needs ``libfuse2t64``), and the tarball needs WebKitGTK 4.1 (``libwebkit2gtk-4.1-0``). See "Linux (preview)" in the README.
 
           ## Check a download
 
@@ -290,4 +301,6 @@ jobs:
             dist-release/*-setup-x64.exe
             dist-release/*-portable-x64.zip
             dist-release/*-linux-x64.tar.gz
+            dist-release/*-linux-x64.deb
+            dist-release/*-linux-x64.AppImage
             dist-release/SHA256SUMS.txt

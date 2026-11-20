@@ -143,7 +143,7 @@
 | D6 | v1.0 additions: theme switcher, flash-free launch, motion, i18n/RTL readiness, OSD, Duplicate Group, per-group volume, pre/post-switch actions, `displaygroups://` URI, disconnect auto-fallback | Approved (§9–§11) |
 | D7 | Deferred to v1.1: window-position restore, automatic triggers, DDC/CI brightness, auto-updater | Planned in §15 |
 | D8 | v1.1 choices (2026-11-19). **Order:** automatic switching first, then window positions, DDC/CI, and the update notice last. **Triggers:** a program starting (switch back when it ends) and a game controller connecting. **Windows:** saved automatically per group. **Updates:** notice only, off by default; never downloads or installs | Approved (§15); §15.1 done |
-| D9 | Linux (2026-11-19). **Scope:** a full port to Ubuntu GNOME (Wayland and X11) through Mutter's DisplayConfig D-Bus API, in phases L1–L4. **Build:** WSL Ubuntu 24.04 on the development PC. **Test:** an Ubuntu GNOME VM | Approved (§16); L1–L3 done |
+| D9 | Linux (2026-11-19). **Scope:** a full port to Ubuntu GNOME (Wayland and X11) through Mutter's DisplayConfig D-Bus API, in phases L1–L4. **Build:** WSL Ubuntu 24.04 on the development PC. **Test:** an Ubuntu GNOME VM | Approved (§16); L1–L4 done |
 
 ---
 
@@ -974,13 +974,10 @@ Settings, `gnome-monitor-config` and `gnome-randr` use the same interface.
 | **L1** | GNOME backend; the CLI on Linux: `status`, `list`, `capture`, `validate`, `apply`, `toggle`, `duplicate`, `recover [--extend]`, `uri` | **Done** |
 | **L2** | The agent and desktop integration (§16.5) | **Done**, except `identify`, moved to L3 |
 | **L3** | The settings app on Linux, and `identify` (§16.6) | **Done** |
-| **L4** | Packaging: see the list below | Planned |
+| **L4** | `.deb` and AppImage packages, and a VM checklist (§16.7) | **Done** |
 
-**L4, packaging:**
-- `.deb` and AppImage from the Tauri bundler (WSL, later a CI job). In an AppImage the
-  shortcuts and links must start the CLI inside it, not the settings app (`$APPIMAGE`);
-- a VM test checklist, starting with what §16.4–16.6 list as not verified yet;
-- Linux sections in README and SECURITY.md.
+What remains is testing on a real Ubuntu desktop and hardware:
+[docs/linux-vm-checklist.md](docs/linux-vm-checklist.md).
 
 ### 16.4 Verified so far
 
@@ -1154,3 +1151,58 @@ The executables sit side by side: `displaygroups` (CLI and agent) and
     only one);
   - the window on a HiDPI display, and GNOME's dark style following "System";
   - the agent started by the app on a real desktop.
+
+### 16.7 The packages (L4, as built)
+
+`scripts/build-linux.sh` makes three downloads in `dist-release/`, each with the settings
+app, the CLI and the agent: `DisplayGroups-<version>-linux-x64.tar.gz`, `.deb` and
+`.AppImage`. The release workflow runs it on `ubuntu-24.04` and adds the three to the
+release and `SHA256SUMS.txt`; "Run workflow" builds them alone, without a release.
+
+- **Bundler:** `tauri build --bundles deb,appimage` with
+  `src-tauri/tauri.release-linux.conf.json`, the Linux counterpart of the Windows release
+  config: the CLI as an "external binary" (`binaries/displaygroups-<triple>`, installed as
+  `/usr/bin/displaygroups`), `locales/*.json` as resources, PNG icons at 32, 64, 128 and
+  256 px (from `icon.ico`'s frames and its 256 px PNG), category Utility. The page is built
+  beforehand, so `beforeBuildCommand` is empty. The CLI comes from `npm ci`, or from
+  `cargo install tauri-cli` where there is no Node (WSL).
+- **Layout:** programs in `/usr/bin`, translations in `/usr/lib/DisplayGroups/locales`
+  (Tauri's resource folder), the app-grid entry `DisplayGroups.desktop`, icons in hicolor.
+  `dg_model::paths::installed_locales` finds translations beside the programs (tarball,
+  Windows) or in `../lib/DisplayGroups/locales` (the `.deb`, and an AppImage's mount).
+- **The `.deb`:** package `display-groups` (Tauri always names it after the product name
+  in kebab case), section utils, `Depends: libwebkit2gtk-4.1-0, libgtk-3-0`. No
+  maintainer scripts. Per-user files (autostart, links, launchers, shortcuts) cannot be
+  removed by `apt`, so the README says to turn them off first.
+- **From WSL:** files read through `/mnt/c` all look world-writable, and the `.deb` would
+  keep those modes. The script therefore builds from a copy in the Linux file system
+  (`rsync --chmod=D755,F644`, in `~/.cache/displaygroups/src`) and copies the results back.
+  `APPIMAGE_EXTRACT_AND_RUN=1` runs linuxdeploy without FUSE (the CI runners have none),
+  and `NO_STRIP=true` skips its `strip`, which fails on Ubuntu 24.04's ELF sections.
+- **The AppImage** (about 80 MB: it carries its own GTK and WebKitGTK):
+  - It mounts itself for as long as the process it started runs. So the agent, started by
+    the settings app, and the settings app, opened from the tray, are started through
+    `$APPIMAGE` (`dg_gnome::system::appimage`), each with a mount of its own. Otherwise
+    closing the window would take the agent's files away.
+  - Its single entry point is the settings app, which hands any arguments except
+    `--identify` to `displaygroups` (`exec`). So `$APPIMAGE agent`, `$APPIMAGE toggle …`
+    and `$APPIMAGE uri …`, which autostart, GNOME shortcuts, launchers and links run
+    (§16.5), reach the CLI. The `.deb`'s `displaygroups-settings` does the same.
+  - Its start-up hooks point GTK's variables (`GTK_PATH`, `GDK_PIXBUF_MODULE_FILE`,
+    `GSETTINGS_SCHEMA_DIR`, …, and an empty `GTK_THEME`) into the mount, and put the mount
+    first in `XDG_DATA_DIRS`. Programs of the system that DisplayGroups starts (`gsettings`,
+    `gio`, `xdg-open`, before/after actions) get the session's environment back
+    (`system::for_host`); its own programs keep it.
+- **Verified** in WSL (Ubuntu 24.04, as root, Mutter 46 headless on a private bus):
+  - the `.deb`'s contents: modes 755 for the two programs and 644 for the rest, nothing
+    world-writable; `desktop-file-validate` passes; `apt install` and `apt remove` leave
+    nothing behind; the installed `displaygroups-settings --version` and `status` reach
+    the CLI;
+  - the AppImage: `capture`, `apply`, `startup on` (autostart runs the AppImage file) and
+    the agent (its GNOME shortcut runs the AppImage file); a before/after action started
+    by it had none of the AppImage's GTK variables; the settings window on Xvfb started the
+    agent, which kept running after the window closed;
+  - printing to a closed pipe (`displaygroups list | head -1`) no longer stops the CLI with
+    a panic.
+- **Not verified yet:** everything in [docs/linux-vm-checklist.md](docs/linux-vm-checklist.md),
+  which also covers what §16.4–16.6 list as open.
